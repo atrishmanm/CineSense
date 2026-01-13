@@ -1,37 +1,24 @@
 services:
-  # Web Service
+  # Web Service (FREE TIER - 750 hours/month)
   - type: web
     name: cinesense-web
     runtime: python
+    plan: free  # Explicitly use free plan
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --workers 2 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
       - key: TMDB_API_KEY
         sync: false
+      # Use external free database - add these manually in Render dashboard
       - key: DB_HOST
-        fromDatabase:
-          name: cinesense-db
-          property: host
+        sync: false
       - key: DB_PORT
-        fromDatabase:
-          name: cinesense-db
-          property: port
+        value: 3306
       - key: DB_NAME
-        fromDatabase:
-          name: cinesense-db
-          property: database
+        sync: false
       - key: DB_USER
-        fromDatabase:
-          name: cinesense-db
-          property: user
+        sync: false
       - key: DB_PASSWORD
-        fromDatabase:
-          name: cinesense-db
-          property: password
-
-databases:
-  - name: cinesense-db
-    databaseName: cinesense
-    user: cinesense
+        sync: false
