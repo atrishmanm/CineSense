@@ -1,0 +1,37 @@
+services:
+  # Web Service
+  - type: web
+    name: cinesense-web
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: TMDB_API_KEY
+        sync: false
+      - key: DB_HOST
+        fromDatabase:
+          name: cinesense-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: cinesense-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: cinesense-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: cinesense-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: cinesense-db
+          property: password
+
+databases:
+  - name: cinesense-db
+    databaseName: cinesense
+    user: cinesense

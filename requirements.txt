@@ -17,3 +17,6 @@ requests==2.31.0
 
 # Utilities
 python-dateutil==2.8.2
+
+# Production Server
+gunicorn==21.2.0
