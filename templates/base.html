@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CineSense - AI Movie Recommendations{% endblock %}</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Swiper CSS for carousels -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@10/swiper-bundle.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        body {
+            background-color: #0f0f0f;
+            color: #ffffff;
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-white">
+    
+    <!-- Navigation -->
+    <nav class="fixed top-0 w-full bg-gradient-to-b from-black to-transparent z-50">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-8">
+                <a href="/" class="text-3xl font-bold text-red-600">
+                    🎬 CineSense
+                </a>
+                <div class="hidden md:flex space-x-6">
+                    <a href="/" class="hover:text-gray-300 transition">Home</a>
+                    <a href="/compare" class="hover:text-gray-300 transition">Compare</a>
+                    <a href="/search" class="hover:text-gray-300 transition">Search</a>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                {% if logged_in %}
+                    <span class="text-gray-400">Hi, {{ username }}!</span>
+                    <a href="/profile" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 transition">
+                        Profile
+                    </a>
+                    <button onclick="logout()" class="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700 transition">
+                        Logout
+                    </button>
+                {% else %}
+                    <a href="/login" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 transition">
+                        Login
+                    </a>
+                    <a href="/signup" class="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700 transition">
+                        Sign Up
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Main Content -->
+    <main class="pt-20">
+        {% block content %}{% endblock %}
+    </main>
+    
+    <!-- Footer -->
+    <footer class="bg-black border-t border-gray-800 mt-20">
+        <div class="container mx-auto px-6 py-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <h3 class="text-xl font-bold text-red-600 mb-4">🎬 CineSense</h3>
+                    <p class="text-gray-400 text-sm">
+                        AI-powered movie recommendations that learn your taste
+                    </p>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-4">Features</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><a href="/" class="hover:text-white transition">Personalized Recommendations</a></li>
+                        <li><a href="/compare" class="hover:text-white transition">Pairwise Comparison</a></li>
+                        <li><a href="/search" class="hover:text-white transition">Advanced Search</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-4">Technology</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li>Machine Learning</li>
+                        <li>Vector Embeddings</li>
+                        <li>Reinforcement Learning</li>
+                        <li>Pairwise Preference Learning</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-4">About</h4>
+                    <p class="text-sm text-gray-400">
+                        Built for BTech CSE DBMS + AI Project<br>
+                        Combining database design with cutting-edge AI
+                    </p>
+                </div>
+            </div>
+            <div class="border-t border-gray-800 mt-8 pt-6 text-center text-sm text-gray-500">
+                © 2026 CineSense. AI-Based Movie Recommendation Platform.
+            </div>
+        </div>
+    </footer>
+    
+    <!-- Swiper JS -->
+    <script src="https://cdn.jsdelivr.net/npm/swiper@10/swiper-bundle.min.js"></script>
+    
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    <script>
+        // Logout function
+        async function logout() {
+            try {
+                const response = await fetch('/api/user/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    window.location.href = '/';
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        }
+    </script>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

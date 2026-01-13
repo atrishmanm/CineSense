@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+
+{% block title %}Compare Movies - CineSense{% endblock %}
+
+{% block content %}
+
+<section class="container mx-auto px-6 py-12 min-h-screen">
+    
+    <!-- Header -->
+    <div class="text-center mb-12">
+        <h1 class="text-5xl font-black mb-4">🆚 Movie Comparison</h1>
+        <p class="text-xl text-gray-400 max-w-2xl mx-auto">
+            Help our AI learn your taste by choosing your preferred movie. 
+            The more you compare, the better our recommendations become!
+        </p>
+        
+        <div class="mt-6 flex items-center justify-center space-x-8">
+            <div class="text-center">
+                <p class="text-3xl font-bold text-red-600" id="comparison-count">0</p>
+                <p class="text-sm text-gray-400">Comparisons Made</p>
+            </div>
+            <div class="text-center">
+                <p class="text-3xl font-bold text-blue-600" id="learning-score">0%</p>
+                <p class="text-sm text-gray-400">AI Learning Progress</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading State -->
+    <div id="loading-state" class="flex justify-center items-center py-20">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-red-600 mx-auto mb-4"></div>
+            <p class="text-gray-400">Loading movies...</p>
+        </div>
+    </div>
+    
+    <!-- Comparison Container -->
+    <div id="comparison-container" class="hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+            
+            <!-- Movie 1 -->
+            <div id="movie-1-card" class="comparison-card group relative bg-gray-900 rounded-2xl overflow-hidden cursor-pointer transform transition-all hover:scale-105 hover:shadow-2xl border-4 border-transparent hover:border-red-600"
+                 onclick="selectMovie(1)">
+                
+                <div class="absolute top-4 right-4 z-20 bg-black/70 px-4 py-2 rounded-full">
+                    <span class="text-yellow-400 font-bold flex items-center">
+                        <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                        </svg>
+                        <span id="movie-1-rating"></span>
+                    </span>
+                </div>
+                
+                <div class="aspect-[2/3] relative">
+                    <img id="movie-1-poster" src="" alt="" class="w-full h-full object-cover">
+                    <div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-transparent to-transparent"></div>
+                </div>
+                
+                <div class="p-6">
+                    <h2 id="movie-1-title" class="text-3xl font-bold mb-3"></h2>
+                    
+                    <div class="flex items-center space-x-4 text-sm text-gray-400 mb-4">
+                        <span id="movie-1-year"></span>
+                        <span id="movie-1-runtime"></span>
+                    </div>
+                    
+                    <div id="movie-1-genres" class="flex flex-wrap gap-2 mb-4"></div>
+                    
+                    <p id="movie-1-overview" class="text-gray-300 line-clamp-4 mb-6"></p>
+                    
+                    <div id="movie-1-cast" class="text-sm text-gray-400 mb-4"></div>
+                    
+                    <div id="movie-1-director" class="text-sm text-gray-400 mb-6"></div>
+                    
+                    <button class="w-full py-4 bg-red-600 hover:bg-red-700 rounded-xl font-bold text-lg transition-colors flex items-center justify-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        Choose This Movie
+                    </button>
+                </div>
+                
+                <!-- Pulse animation on hover -->
+                <div class="absolute inset-0 border-4 border-red-600 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+            </div>
+            
+            <!-- VS Divider -->
+            <div class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 hidden lg:block">
+                <div class="bg-gradient-to-r from-red-600 to-pink-600 w-24 h-24 rounded-full flex items-center justify-center shadow-2xl border-4 border-white">
+                    <span class="text-4xl font-black">VS</span>
+                </div>
+            </div>
+            
+            <!-- Mobile VS -->
+            <div class="lg:hidden text-center my-8">
+                <div class="inline-block bg-gradient-to-r from-red-600 to-pink-600 px-8 py-4 rounded-full">
+                    <span class="text-3xl font-black">VS</span>
+                </div>
+            </div>
+            
+            <!-- Movie 2 -->
+            <div id="movie-2-card" class="comparison-card group relative bg-gray-900 rounded-2xl overflow-hidden cursor-pointer transform transition-all hover:scale-105 hover:shadow-2xl border-4 border-transparent hover:border-blue-600"
+                 onclick="selectMovie(2)">
+                
+                <div class="absolute top-4 right-4 z-20 bg-black/70 px-4 py-2 rounded-full">
+                    <span class="text-yellow-400 font-bold flex items-center">
+                        <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                        </svg>
+                        <span id="movie-2-rating"></span>
+                    </span>
+                </div>
+                
+                <div class="aspect-[2/3] relative">
+                    <img id="movie-2-poster" src="" alt="" class="w-full h-full object-cover">
+                    <div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-transparent to-transparent"></div>
+                </div>
+                
+                <div class="p-6">
+                    <h2 id="movie-2-title" class="text-3xl font-bold mb-3"></h2>
+                    
+                    <div class="flex items-center space-x-4 text-sm text-gray-400 mb-4">
+                        <span id="movie-2-year"></span>
+                        <span id="movie-2-runtime"></span>
+                    </div>
+                    
+                    <div id="movie-2-genres" class="flex flex-wrap gap-2 mb-4"></div>
+                    
+                    <p id="movie-2-overview" class="text-gray-300 line-clamp-4 mb-6"></p>
+                    
+                    <div id="movie-2-cast" class="text-sm text-gray-400 mb-4"></div>
+                    
+                    <div id="movie-2-director" class="text-sm text-gray-400 mb-6"></div>
+                    
+                    <button class="w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold text-lg transition-colors flex items-center justify-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        Choose This Movie
+                    </button>
+                </div>
+                
+                <!-- Pulse animation on hover -->
+                <div class="absolute inset-0 border-4 border-blue-600 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+            </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="text-center mt-12">
+            <button onclick="skipComparison()" class="px-8 py-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition text-gray-300">
+                Skip This Pair
+            </button>
+        </div>
+    </div>
+    
+    <!-- Success Message -->
+    <div id="success-message" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-gray-900 rounded-2xl p-8 max-w-md text-center transform scale-0 transition-transform" id="success-card">
+            <div class="w-20 h-20 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+            <h3 class="text-3xl font-bold mb-4">Choice Recorded!</h3>
+            <p class="text-gray-400 mb-6">Our AI has learned from your preference</p>
+            <button onclick="loadNextPair()" class="px-8 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-bold transition">
+                Next Comparison
+            </button>
+        </div>
+    </div>
+    
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentMovies = { movie1: null, movie2: null };
+    let comparisonCount = 0;
+    
+    // Load initial comparison
+    document.addEventListener('DOMContentLoaded', () => {
+        loadNextPair();
+        loadUserStats();
+    });
+    
+    // Load next movie pair
+    async function loadNextPair() {
+        try {
+            // Hide success message
+            document.getElementById('success-message').classList.add('hidden');
+            document.getElementById('success-card').style.transform = 'scale(0)';
+            
+            // Show loading
+            document.getElementById('loading-state').classList.remove('hidden');
+            document.getElementById('comparison-container').classList.add('hidden');
+            
+            const response = await fetch('/api/compare');
+            const data = await response.json();
+            
+            if (data.movie1 && data.movie2) {
+                currentMovies.movie1 = data.movie1;
+                currentMovies.movie2 = data.movie2;
+                
+                displayMovie(1, data.movie1);
+                displayMovie(2, data.movie2);
+                
+                document.getElementById('loading-state').classList.add('hidden');
+                document.getElementById('comparison-container').classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('Error loading comparison:', error);
+            alert('Failed to load movies. Please try again.');
+        }
+    }
+    
+    // Display movie in card
+    function displayMovie(num, movie) {
+        const posterUrl = movie.poster_path 
+            ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+            : 'https://via.placeholder.com/500x750?text=No+Poster';
+        
+        document.getElementById(`movie-${num}-poster`).src = posterUrl;
+        document.getElementById(`movie-${num}-title`).textContent = movie.title;
+        document.getElementById(`movie-${num}-rating`).textContent = movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A';
+        document.getElementById(`movie-${num}-year`).textContent = movie.release_year || 'N/A';
+        document.getElementById(`movie-${num}-runtime`).textContent = movie.runtime ? `${movie.runtime} min` : '';
+        document.getElementById(`movie-${num}-overview`).textContent = movie.overview || 'No overview available.';
+        
+        // Genres
+        const genresContainer = document.getElementById(`movie-${num}-genres`);
+        if (movie.genres) {
+            const genres = movie.genres.split(',').map(g => g.trim());
+            genresContainer.innerHTML = genres.map(genre => 
+                `<span class="px-3 py-1 bg-gray-800 rounded-full text-sm">${genre}</span>`
+            ).join('');
+        }
+        
+        // Cast
+        const castContainer = document.getElementById(`movie-${num}-cast`);
+        if (movie.cast) {
+            const cast = movie.cast.split(',').slice(0, 3).join(', ');
+            castContainer.innerHTML = `<strong>Cast:</strong> ${cast}`;
+        }
+        
+        // Director
+        const directorContainer = document.getElementById(`movie-${num}-director`);
+        if (movie.directors) {
+            directorContainer.innerHTML = `<strong>Director:</strong> ${movie.directors}`;
+        }
+    }
+    
+    // Select movie
+    async function selectMovie(num) {
+        const chosenMovie = num === 1 ? currentMovies.movie1 : currentMovies.movie2;
+        const rejectedMovie = num === 1 ? currentMovies.movie2 : currentMovies.movie1;
+        
+        try {
+            const response = await fetch('/api/feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    movie1_id: currentMovies.movie1.movie_id,
+                    movie2_id: currentMovies.movie2.movie_id,
+                    chosen_id: chosenMovie.movie_id
+                })
+            });
+            
+            if (response.ok) {
+                comparisonCount++;
+                updateStats();
+                showSuccessAnimation();
+            } else {
+                const error = await response.json();
+                alert(error.error || 'Failed to record choice');
+            }
+        } catch (error) {
+            console.error('Error submitting feedback:', error);
+            alert('Failed to submit feedback. Please try again.');
+        }
+    }
+    
+    // Show success animation
+    function showSuccessAnimation() {
+        document.getElementById('success-message').classList.remove('hidden');
+        setTimeout(() => {
+            document.getElementById('success-card').style.transform = 'scale(1)';
+        }, 100);
+    }
+    
+    // Skip comparison
+    function skipComparison() {
+        loadNextPair();
+    }
+    
+    // Load user stats
+    async function loadUserStats() {
+        try {
+            const response = await fetch('/api/user/profile');
+            if (response.ok) {
+                const data = await response.json();
+                comparisonCount = data.total_comparisons || 0;
+                updateStats();
+            }
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+    
+    // Update stats display
+    function updateStats() {
+        document.getElementById('comparison-count').textContent = comparisonCount;
+        
+        // Calculate learning progress (cap at 100%)
+        const progress = Math.min(100, Math.round((comparisonCount / 50) * 100));
+        document.getElementById('learning-score').textContent = `${progress}%`;
+    }
+</script>
+
+<style>
+    .comparison-card {
+        min-height: 600px;
+    }
+    
+    .line-clamp-4 {
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    
+    #success-card {
+        transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    }
+</style>
+{% endblock %}
