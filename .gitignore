@@ -1,5 +1,7 @@
-# Environment
+# Environment variables
 .env
+.env.local
+.env.*.local
 venv/
 env/
 ENV/
@@ -22,3 +24,16 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Distribution
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Temporary files
+*.tmp
+*.bak

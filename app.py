@@ -4,17 +4,27 @@ AI-Based Movie Recommendation Platform
 """
 
 from flask import Flask, render_template, session
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from config import Config
 from api.routes import api
 import secrets
 import logging
+from decimal import Decimal
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class DecimalJSONProvider(DefaultJSONProvider):
+    """Custom JSON provider to handle Decimal types"""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
 
 
 def create_app():
@@ -25,6 +35,9 @@ def create_app():
     app.config['SECRET_KEY'] = Config.SECRET_KEY
     app.config['SESSION_TYPE'] = 'filesystem'
     app.config['JSON_SORT_KEYS'] = False
+    
+    # Set custom JSON provider for Decimal handling
+    app.json = DecimalJSONProvider(app)
     
     # Enable CORS
     CORS(app)
@@ -68,7 +81,7 @@ def create_app():
         """User profile page"""
         if 'user_id' not in session:
             return render_template('login.html', redirect='/profile')
-        return render_template('profile.html')
+        return render_template('profile.html', logged_in=True, username=session.get('username'))
     
     @app.route('/search')
     def search():
@@ -106,19 +119,13 @@ def create_app():
         if 'session_id' not in session:
             session['session_id'] = secrets.token_hex(16)
     
-    # ==========================================================================
-    # STARTUP
-    # ==========================================================================
-    
-    @app.before_first_request
-    def startup():
-        """Run on first request"""
-        logger.info("=" * 60)
-        logger.info("🎬 CINESENSE - AI Movie Recommendation Platform")
-        logger.info("=" * 60)
-        logger.info("Application started successfully")
-        logger.info(f"Debug mode: {Config.DEBUG}")
-        logger.info("=" * 60)
+    # Startup logging (removed before_first_request as it's deprecated in Flask 3.0)
+    logger.info("=" * 60)
+    logger.info("🎬 CINESENSE - AI Movie Recommendation Platform")
+    logger.info("=" * 60)
+    logger.info("Application initialized successfully")
+    logger.info(f"Debug mode: {Config.DEBUG}")
+    logger.info("=" * 60)
     
     return app
 

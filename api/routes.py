@@ -120,6 +120,168 @@ def get_profile():
         return jsonify({'error': 'Internal server error'}), 500
 
 
+@api.route('/user/preferences', methods=['GET'])
+def get_user_preferences():
+    """Get AI-analyzed user preferences and insights"""
+    try:
+        user_id = session.get('user_id')
+        
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Get user interactions
+        interactions = db.get_user_interactions(user_id, limit=1000)
+        
+        if not interactions or len(interactions) == 0:
+            return jsonify({
+                'genre_preferences': [],
+                'favorite_directors': [],
+                'favorite_actors': [],
+                'favorite_movies': [],
+                'average_rating': 0,
+                'preferred_era': 'N/A',
+                'prefers_classics': False
+            }), 200
+        
+        # Analyze genre preferences
+        genre_counts = {}
+        director_counts = {}
+        actor_counts = {}
+        chosen_movies = []
+        ratings = []
+        years = []
+        
+        for interaction in interactions:
+            chosen_id = interaction.get('chosen_movie_id')
+            if chosen_id:
+                movie = db.get_movie_by_id(chosen_id)
+                if movie:
+                    chosen_movies.append(movie)
+                    
+                    # Count genres
+                    if movie.get('genres'):
+                        for genre in movie['genres'].split(','):
+                            genre = genre.strip()
+                            genre_counts[genre] = genre_counts.get(genre, 0) + 1
+                    
+                    # Count directors
+                    if movie.get('directors'):
+                        for director in movie['directors'].split(','):
+                            director = director.strip()
+                            director_counts[director] = director_counts.get(director, 0) + 1
+                    
+                    # Count actors
+                    if movie.get('cast'):
+                        for actor in movie['cast'].split(',')[:5]:  # Top 5 actors
+                            actor = actor.strip()
+                            actor_counts[actor] = actor_counts.get(actor, 0) + 1
+                    
+                    # Collect ratings and years
+                    if movie.get('tmdb_rating'):
+                        ratings.append(float(movie['tmdb_rating']))
+                    if movie.get('release_year'):
+                        years.append(movie['release_year'])
+        
+        # Sort and format results
+        genre_preferences = [
+            {'genre': genre, 'count': count}
+            for genre, count in sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        favorite_directors = [
+            {'name': director, 'count': count}
+            for director, count in sorted(director_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        favorite_actors = [
+            {'name': actor, 'count': count}
+            for actor, count in sorted(actor_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        # Calculate statistics
+        avg_rating = sum(ratings) / len(ratings) if ratings else 0
+        avg_year = sum(years) / len(years) if years else 2000
+        
+        # Determine preferred era
+        if avg_year < 1980:
+            preferred_era = 'Classic Era (pre-1980)'
+        elif avg_year < 2000:
+            preferred_era = '80s-90s'
+        elif avg_year < 2010:
+            preferred_era = '2000s'
+        else:
+            preferred_era = 'Modern (2010+)'
+        
+        prefers_classics = avg_year < 2000
+        
+        return jsonify({
+            'genre_preferences': genre_preferences[:10],
+            'favorite_directors': favorite_directors[:10],
+            'favorite_actors': favorite_actors[:10],
+            'favorite_movies': chosen_movies[:10],
+            'average_rating': avg_rating,
+            'preferred_era': preferred_era,
+            'prefers_classics': prefers_classics
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Preferences error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@api.route('/user/interactions', methods=['GET'])
+def get_user_interactions_api():
+    """Get user interaction history with activity timeline"""
+    try:
+        user_id = session.get('user_id')
+        
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Get interactions
+        interactions = db.get_user_interactions(user_id, limit=1000)
+        
+        # Build activity timeline (last 30 days)
+        from collections import defaultdict
+        from datetime import datetime, timedelta
+        
+        activity_by_date = defaultdict(int)
+        
+        for interaction in interactions:
+            timestamp = interaction.get('timestamp')
+            if timestamp:
+                try:
+                    date = datetime.fromisoformat(str(timestamp)).date()
+                    activity_by_date[str(date)] += 1
+                except:
+                    pass
+        
+        # Create timeline for last 30 days
+        timeline = []
+        today = datetime.now().date()
+        for i in range(30, -1, -1):
+            date = today - timedelta(days=i)
+            date_str = str(date)
+            timeline.append({
+                'date': date.strftime('%m/%d'),
+                'count': activity_by_date.get(date_str, 0)
+            })
+        
+        return jsonify({
+            'total_comparisons': len(interactions),
+            'activity_timeline': timeline,
+            'recent_interactions': interactions[:20]
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Interactions error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Internal server error'}), 500
+
+
 # ============================================================================
 # RECOMMENDATION ENDPOINTS
 # ============================================================================
@@ -184,9 +346,14 @@ def get_comparison():
     try:
         user_id = session.get('user_id')
         
+        logger.info(f"Getting comparison pair for user_id: {user_id}")
         movie1, movie2 = recommender.get_comparison_pair(user_id)
         
+        logger.info(f"Movie1: {movie1}")
+        logger.info(f"Movie2: {movie2}")
+        
         if not movie1 or not movie2:
+            logger.error("Could not generate comparison pair - movies are None")
             return jsonify({'error': 'Could not generate comparison pair'}), 500
         
         return jsonify({
@@ -196,6 +363,8 @@ def get_comparison():
         
     except Exception as e:
         logger.error(f"Comparison error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Internal server error'}), 500
 
 

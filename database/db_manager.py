@@ -147,7 +147,7 @@ class DatabaseManager:
             cursor.execute(query, (movie_id,))
             return cursor.fetchone()
     
-    def get_random_movies(self, limit=10, min_popularity=10):
+    def get_random_movies(self, limit=10, min_popularity=0):
         """Get random movies for comparison"""
         query = """
             SELECT * FROM movies 

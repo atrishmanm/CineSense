@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}My Profile - CineSense{% endblock %}
+
+{% block content %}
+
+<section class="container mx-auto px-6 py-12 min-h-screen">
+    
+    <!-- Header -->
+    <div class="mb-12">
+        <div class="flex items-center justify-between">
+            <div>
+                <h1 class="text-5xl font-black mb-2">My Profile</h1>
+                <p class="text-xl text-gray-400">Your personalized taste profile powered by AI</p>
+            </div>
+            <div class="text-right">
+                <p class="text-sm text-gray-400">Member since</p>
+                <p class="text-lg font-bold" id="member-since">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading-state" class="flex justify-center items-center py-20">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-red-600 mx-auto mb-4"></div>
+            <p class="text-gray-400">Analyzing your preferences...</p>
+        </div>
+    </div>
+
+    <!-- Profile Content -->
+    <div id="profile-content" class="hidden">
+        
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+            <div class="bg-gradient-to-br from-red-600 to-pink-600 rounded-2xl p-6 text-center">
+                <div class="text-4xl font-black mb-2" id="stat-comparisons">0</div>
+                <div class="text-sm opacity-90">Comparisons Made</div>
+            </div>
+            <div class="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-2xl p-6 text-center">
+                <div class="text-4xl font-black mb-2" id="stat-movies-seen">0</div>
+                <div class="text-sm opacity-90">Movies Explored</div>
+            </div>
+            <div class="bg-gradient-to-br from-green-600 to-emerald-600 rounded-2xl p-6 text-center">
+                <div class="text-4xl font-black mb-2" id="stat-ai-learning">0%</div>
+                <div class="text-sm opacity-90">AI Learning</div>
+            </div>
+            <div class="bg-gradient-to-br from-purple-600 to-violet-600 rounded-2xl p-6 text-center">
+                <div class="text-4xl font-black mb-2" id="stat-top-genre">-</div>
+                <div class="text-sm opacity-90">Favorite Genre</div>
+            </div>
+        </div>
+
+        <!-- AI Insights -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+            
+            <!-- Taste Profile -->
+            <div class="bg-gray-900 rounded-2xl p-8">
+                <h2 class="text-2xl font-bold mb-6 flex items-center">
+                    <svg class="w-8 h-8 mr-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                    </svg>
+                    AI Taste Profile
+                </h2>
+                <div id="taste-summary" class="text-gray-300 leading-relaxed mb-6">
+                    <p class="mb-4">Analyzing your movie preferences...</p>
+                </div>
+            </div>
+
+            <!-- Genre Preferences Chart -->
+            <div class="bg-gray-900 rounded-2xl p-8">
+                <h2 class="text-2xl font-bold mb-6 flex items-center">
+                    <svg class="w-8 h-8 mr-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    Genre Preferences
+                </h2>
+                <div id="genre-chart" class="space-y-3">
+                    <!-- Genre bars will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Timeline -->
+        <div class="bg-gray-900 rounded-2xl p-6 mb-12">
+            <h2 class="text-2xl font-bold mb-4 flex items-center">
+                <svg class="w-8 h-8 mr-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                </svg>
+                Activity Over Time
+            </h2>
+            <div style="height: 120px; max-height: 120px;">
+                <canvas id="activity-chart" class="w-full" height="120"></canvas>
+            </div>
+        </div>
+
+        <!-- Favorite Movies -->
+        <div class="bg-gray-900 rounded-2xl p-8 mb-12">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <svg class="w-8 h-8 mr-3 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                </svg>
+                Your Top Choices
+            </h2>
+            <div id="favorite-movies" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <!-- Favorite movies will be inserted here -->
+            </div>
+        </div>
+
+        <!-- Director & Actor Preferences -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-gray-900 rounded-2xl p-8">
+                <h2 class="text-2xl font-bold mb-6">Favorite Directors</h2>
+                <div id="favorite-directors" class="space-y-3">
+                    <!-- Directors will be inserted here -->
+                </div>
+            </div>
+            <div class="bg-gray-900 rounded-2xl p-8">
+                <h2 class="text-2xl font-bold mb-6">Favorite Actors</h2>
+                <div id="favorite-actors" class="space-y-3">
+                    <!-- Actors will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+    let activityChart = null;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadProfileData();
+    });
+
+    async function loadProfileData() {
+        try {
+            // Fetch user profile
+            const profileResponse = await fetch('/api/user/profile');
+            const profile = await profileResponse.json();
+
+            // Fetch user preferences analysis
+            const prefsResponse = await fetch('/api/user/preferences');
+            const preferences = await prefsResponse.json();
+
+            // Fetch user interactions
+            const interactionsResponse = await fetch('/api/user/interactions');
+            const interactions = await interactionsResponse.json();
+
+            // Update stats
+            updateStats(profile, preferences, interactions);
+
+            // Generate AI taste summary
+            generateTasteSummary(preferences, interactions);
+
+            // Render genre chart
+            renderGenreChart(preferences.genre_preferences || []);
+
+            // Render activity chart
+            renderActivityChart(interactions.activity_timeline || []);
+
+            // Show favorite movies
+            renderFavoriteMovies(preferences.favorite_movies || []);
+
+            // Show favorite directors & actors
+            renderFavoriteDirectors(preferences.favorite_directors || []);
+            renderFavoriteActors(preferences.favorite_actors || []);
+
+            // Update member since
+            if (profile.created_at) {
+                const date = new Date(profile.created_at);
+                document.getElementById('member-since').textContent = date.toLocaleDateString();
+            }
+
+            // Show content
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('profile-content').classList.remove('hidden');
+
+        } catch (error) {
+            console.error('Error loading profile:', error);
+            document.getElementById('loading-state').innerHTML = `
+                <div class="text-center">
+                    <p class="text-red-500 text-xl mb-4">Error loading profile</p>
+                    <p class="text-gray-400">Please try again later</p>
+                </div>
+            `;
+        }
+    }
+
+    function updateStats(profile, preferences, interactions) {
+        document.getElementById('stat-comparisons').textContent = profile.total_comparisons || 0;
+        document.getElementById('stat-movies-seen').textContent = profile.unique_movies_seen || 0;
+        
+        const learningProgress = Math.min(100, Math.round((profile.total_comparisons / 50) * 100));
+        document.getElementById('stat-ai-learning').textContent = `${learningProgress}%`;
+        
+        const topGenre = preferences.genre_preferences && preferences.genre_preferences.length > 0
+            ? preferences.genre_preferences[0].genre
+            : '-';
+        document.getElementById('stat-top-genre').textContent = topGenre;
+    }
+
+    function generateTasteSummary(preferences, interactions) {
+        const container = document.getElementById('taste-summary');
+        
+        if (!preferences || !preferences.genre_preferences || preferences.genre_preferences.length === 0) {
+            container.innerHTML = '<p class="text-gray-400 italic">Start comparing movies to build your taste profile!</p>';
+            return;
+        }
+
+        const topGenres = preferences.genre_preferences.slice(0, 3).map(g => g.genre).join(', ');
+        const avgRating = preferences.average_rating ? preferences.average_rating.toFixed(1) : '7.5';
+        const preferredEra = preferences.preferred_era || '2000s';
+
+        const summary = `
+            <p class="mb-4">
+                <span class="font-bold text-red-400">Based on ${interactions.total_comparisons || 0} comparisons</span>, 
+                our AI has identified your unique taste profile.
+            </p>
+            <p class="mb-4">
+                You gravitate towards <span class="font-bold text-blue-400">${topGenres}</span> films, 
+                with an average preference for movies rated <span class="font-bold text-yellow-400">${avgRating}/10</span>.
+            </p>
+            <p class="mb-4">
+                Your choices suggest a preference for <span class="font-bold text-green-400">${preferredEra} cinema</span>, 
+                ${preferences.prefers_classics ? 'with a notable appreciation for classic films' : 'with a focus on contemporary releases'}.
+            </p>
+            <p class="text-sm text-gray-500 mt-6">
+                💡 The more you compare, the more accurate your recommendations become!
+            </p>
+        `;
+
+        container.innerHTML = summary;
+    }
+
+    function renderGenreChart(genrePreferences) {
+        const container = document.getElementById('genre-chart');
+        
+        if (!genrePreferences || genrePreferences.length === 0) {
+            container.innerHTML = '<p class="text-gray-400 italic">No genre data yet. Start comparing movies!</p>';
+            return;
+        }
+
+        const maxCount = Math.max(...genrePreferences.map(g => g.count));
+        
+        container.innerHTML = genrePreferences.slice(0, 8).map(genre => {
+            const percentage = (genre.count / maxCount) * 100;
+            return `
+                <div>
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="font-semibold">${genre.genre}</span>
+                        <span class="text-gray-400">${genre.count} movies</span>
+                    </div>
+                    <div class="w-full bg-gray-800 rounded-full h-3 overflow-hidden">
+                        <div class="bg-gradient-to-r from-blue-600 to-cyan-400 h-full rounded-full transition-all duration-1000" 
+                             style="width: ${percentage}%"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderActivityChart(timeline) {
+        const canvas = document.getElementById('activity-chart');
+        const ctx = canvas.getContext('2d');
+
+        if (activityChart) {
+            activityChart.destroy();
+        }
+
+        if (!timeline || timeline.length === 0) {
+            ctx.fillStyle = '#6B7280';
+            ctx.font = '16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('No activity data yet', canvas.width / 2, canvas.height / 2);
+            return;
+        }
+
+        const labels = timeline.map(t => t.date);
+        const data = timeline.map(t => t.count);
+
+        activityChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Comparisons',
+                    data: data,
+                    borderColor: 'rgb(239, 68, 68)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            color: '#9CA3AF'
+                        },
+                        grid: {
+                            color: '#374151'
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            color: '#9CA3AF'
+                        },
+                        grid: {
+                            color: '#374151'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderFavoriteMovies(movies) {
+        const container = document.getElementById('favorite-movies');
+        
+        if (!movies || movies.length === 0) {
+            container.innerHTML = '<p class="text-gray-400 italic col-span-full">No favorite movies yet</p>';
+            return;
+        }
+
+        container.innerHTML = movies.slice(0, 10).map(movie => {
+            const posterUrl = movie.poster_path 
+                ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+                : 'https://via.placeholder.com/500x750?text=No+Poster';
+            
+            return `
+                <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
+                    <div class="relative rounded-lg overflow-hidden aspect-[2/3] mb-2">
+                        <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover">
+                        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all flex items-center justify-center">
+                            <span class="text-yellow-400 font-bold opacity-0 group-hover:opacity-100">
+                                ★ ${movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A'}
+                            </span>
+                        </div>
+                    </div>
+                    <p class="text-sm font-semibold truncate">${movie.title}</p>
+                    <p class="text-xs text-gray-400">${movie.release_year || ''}</p>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderFavoriteDirectors(directors) {
+        const container = document.getElementById('favorite-directors');
+        
+        if (!directors || directors.length === 0) {
+            container.innerHTML = '<p class="text-gray-400 italic">No data yet</p>';
+            return;
+        }
+
+        container.innerHTML = directors.slice(0, 5).map((director, index) => `
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <span class="text-2xl font-bold text-gray-700 mr-3">${index + 1}</span>
+                    <span class="font-semibold">${director.name}</span>
+                </div>
+                <span class="text-gray-400 text-sm">${director.count} movies</span>
+            </div>
+        `).join('');
+    }
+
+    function renderFavoriteActors(actors) {
+        const container = document.getElementById('favorite-actors');
+        
+        if (!actors || actors.length === 0) {
+            container.innerHTML = '<p class="text-gray-400 italic">No data yet</p>';
+            return;
+        }
+
+        container.innerHTML = actors.slice(0, 5).map((actor, index) => `
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <span class="text-2xl font-bold text-gray-700 mr-3">${index + 1}</span>
+                    <span class="font-semibold">${actor.name}</span>
+                </div>
+                <span class="text-gray-400 text-sm">${actor.count} movies</span>
+            </div>
+        `).join('');
+    }
+</script>
+{% endblock %}

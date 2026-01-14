@@ -61,11 +61,11 @@ class MovieEmbedding:
         metadata_start = self.genre_dim + self.director_dim + self.actor_dim
         
         # Rating (0-10 scale, normalized to 0-1)
-        rating = movie_data.get('tmdb_rating', 5.0)
+        rating = float(movie_data.get('tmdb_rating', 5.0))
         embedding[metadata_start] = rating / 10.0
         
         # Popularity (log-normalized)
-        popularity = movie_data.get('popularity', 1.0)
+        popularity = float(movie_data.get('popularity', 1.0))
         embedding[metadata_start + 1] = np.log1p(popularity) / 10.0
         
         # Year (normalized: 1900-2030)

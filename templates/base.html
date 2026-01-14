@@ -30,10 +30,10 @@
 <body class="bg-gray-950 text-white">
     
     <!-- Navigation -->
-    <nav class="fixed top-0 w-full bg-gradient-to-b from-black to-transparent z-50">
+    <nav class="fixed top-0 w-full bg-transparent z-50">
         <div class="container mx-auto px-6 py-4 flex justify-between items-center">
             <div class="flex items-center space-x-8">
-                <a href="/" class="text-3xl font-bold text-red-600">
+                <a href="/" class="text-3xl font-bold text-white">
                     🎬 CineSense
                 </a>
                 <div class="hidden md:flex space-x-6">
@@ -49,14 +49,14 @@
                     <a href="/profile" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 transition">
                         Profile
                     </a>
-                    <button onclick="logout()" class="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700 transition">
+                    <button onclick="logout()" class="px-4 py-2 bg-indigo-600 rounded-lg hover:bg-indigo-700 transition">
                         Logout
                     </button>
                 {% else %}
                     <a href="/login" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 transition">
                         Login
                     </a>
-                    <a href="/signup" class="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700 transition">
+                    <a href="/signup" class="px-4 py-2 bg-indigo-600 rounded-lg hover:bg-indigo-700 transition">
                         Sign Up
                     </a>
                 {% endif %}

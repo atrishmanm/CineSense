@@ -131,16 +131,16 @@ class CineSenseRecommender:
         if movie.get('cast'):
             actors = [a.strip() for a in movie['cast'].split(',')[:10]]
         
-        # Create movie data dictionary
+        # Create movie data dictionary (convert Decimal to float)
         movie_data = {
             'genres': genres,
             'directors': directors,
             'actors': actors,
-            'tmdb_rating': movie.get('tmdb_rating', 5.0),
-            'popularity': movie.get('popularity', 1.0),
-            'release_year': movie.get('release_year', 2000),
-            'vote_count': movie.get('vote_count', 0),
-            'runtime': movie.get('runtime', 90)
+            'tmdb_rating': float(movie.get('tmdb_rating', 5.0)),
+            'popularity': float(movie.get('popularity', 1.0)),
+            'release_year': int(movie.get('release_year', 2000)),
+            'vote_count': int(movie.get('vote_count', 0)),
+            'runtime': int(movie.get('runtime', 90))
         }
         
         # Create embedding
@@ -228,24 +228,29 @@ class CineSenseRecommender:
             logger.error(f"Error processing user choice: {e}")
             return False
     
-    def get_comparison_pair(self, user_id=None, min_popularity=10):
+    def get_comparison_pair(self, user_id=None, min_popularity=0):
         """
         Get two movies for pairwise comparison
         Uses bandit algorithm to balance exploration/exploitation
         
         Args:
             user_id: Optional user ID for personalization
-            min_popularity: Minimum popularity threshold
+            min_popularity: Minimum popularity threshold (default 0 for all movies)
         
         Returns:
             Tuple of two movie dictionaries
         """
         try:
-            # Get candidate movies
+            # Get candidate movies (lower threshold for small databases)
             candidates = db.get_random_movies(limit=50, min_popularity=min_popularity)
             
             if len(candidates) < 2:
-                logger.error("Not enough movies for comparison")
+                logger.warning(f"Not enough movies for comparison. Found {len(candidates)} movies")
+                # Try without popularity filter
+                candidates = db.get_random_movies(limit=50, min_popularity=0)
+            
+            if len(candidates) < 2:
+                logger.error("Still not enough movies for comparison")
                 return None, None
             
             # Extract movie IDs
@@ -302,6 +307,9 @@ class CineSenseRecommender:
             for interaction in interactions:
                 seen_movie_ids.add(interaction['movie_1_id'])
                 seen_movie_ids.add(interaction['movie_2_id'])
+                # Also add the chosen movie specifically
+                if interaction.get('chosen_movie_id'):
+                    seen_movie_ids.add(interaction['chosen_movie_id'])
             
             # Score each movie
             movie_scores = []
