@@ -258,51 +258,140 @@ class UserEmbedding:
 class ContentBasedRecommender:
     """
     Content-based recommendation using embeddings
+    WITH LAZY LOADING SUPPORT
     """
     
     def __init__(self):
         self.movie_embedder = MovieEmbedding()
         self.movie_embeddings = {}  # movie_id -> embedding
+        
+        # Lazy loading components
+        from ai.cache_manager import cache_manager
+        self.cache = cache_manager
+        
+        # Encoders (shared across all movies)
+        self.genre_encoder = None
+        self.director_encoder = None
+        self.actor_encoder = None
+    
+    def initialize_encoders(self, genre_encoder, director_encoder, actor_encoder):
+        """
+        Initialize feature encoders
+        
+        These are shared across all movies for consistent encoding
+        """
+        self.genre_encoder = genre_encoder
+        self.director_encoder = director_encoder
+        self.actor_encoder = actor_encoder
+    
+    def get_or_create_embedding(self, movie_id, movie_data=None):
+        """
+        LAZY EMBEDDING: Get embedding from cache or compute on-demand
+        
+        Args:
+            movie_id: Movie ID
+            movie_data: Movie data dict (optional, will fetch if not provided)
+        
+        Returns:
+            numpy array: Movie embedding
+        """
+        # Check vector cache first (FAST)
+        cached_vector = self.cache.get_vector(movie_id)
+        if cached_vector is not None:
+            return cached_vector
+        
+        # Check in-memory embeddings
+        if movie_id in self.movie_embeddings:
+            return self.movie_embeddings[movie_id]
+        
+        # Need to compute - ensure we have movie data
+        if movie_data is None:
+            # Try cache
+            movie_data = self.cache.get_movie(movie_id)
+            
+            if movie_data is None:
+                logger.warning(f"Cannot create embedding for movie {movie_id} - no data available")
+                return None
+        
+        # Compute embedding ON-DEMAND
+        if not all([self.genre_encoder, self.director_encoder, self.actor_encoder]):
+            logger.error("Encoders not initialized - call initialize_encoders() first")
+            return None
+        
+        embedding = self.movie_embedder.create_embedding(
+            movie_data,
+            self.genre_encoder,
+            self.director_encoder,
+            self.actor_encoder
+        )
+        
+        # Cache for future use
+        self.cache.put_vector(movie_id, embedding)
+        self.movie_embeddings[movie_id] = embedding
+        
+        logger.debug(f"Created embedding for movie {movie_id} on-demand")
+        
+        return embedding
     
     def add_movie(self, movie_id, embedding):
-        """Add movie embedding to index"""
+        """
+        Add movie embedding to index
+        
+        DEPRECATED: Use get_or_create_embedding() instead for lazy loading
+        """
         self.movie_embeddings[movie_id] = np.array(embedding)
+        self.cache.put_vector(movie_id, embedding)
     
-    def find_similar_movies(self, movie_id, n=10):
+    def find_similar_movies(self, movie_id, n=10, candidate_ids=None):
         """
         Find movies similar to given movie
+        WITH CANDIDATE FILTERING (don't search all movies!)
         
         Args:
             movie_id: Reference movie ID
             n: Number of similar movies to return
+            candidate_ids: List of candidate movie IDs to search (IMPORTANT!)
         
         Returns:
             List of (movie_id, similarity_score) tuples
         """
-        if movie_id not in self.movie_embeddings:
+        # Get target embedding (lazy)
+        target_embedding = self.get_or_create_embedding(movie_id)
+        if target_embedding is None:
             return []
         
-        target_embedding = self.movie_embeddings[movie_id]
         similarities = []
         
-        for mid, embedding in self.movie_embeddings.items():
+        # Search only candidates (not all movies!)
+        if candidate_ids:
+            search_ids = candidate_ids
+        else:
+            # Fallback to cached movies only
+            search_ids = list(self.movie_embeddings.keys())
+        
+        for mid in search_ids:
             if mid != movie_id:
-                sim = self.movie_embedder.similarity(target_embedding, embedding)
-                similarities.append((mid, sim))
+                # Get embedding (lazy)
+                embedding = self.get_or_create_embedding(mid)
+                if embedding is not None:
+                    sim = self.movie_embedder.similarity(target_embedding, embedding)
+                    similarities.append((mid, sim))
         
         # Sort by similarity descending
         similarities.sort(key=lambda x: x[1], reverse=True)
         
         return similarities[:n]
     
-    def recommend_for_user(self, user_embedding, n=10, exclude_ids=None):
+    def recommend_for_user(self, user_embedding, n=10, exclude_ids=None, candidate_ids=None):
         """
         Recommend movies for a user based on their embedding
+        WITH CANDIDATE FILTERING (production-ready!)
         
         Args:
             user_embedding: User's preference vector
             n: Number of recommendations
             exclude_ids: Set of movie IDs to exclude
+            candidate_ids: List of candidate IDs to rank (IMPORTANT!)
         
         Returns:
             List of (movie_id, score) tuples
@@ -313,11 +402,21 @@ class ContentBasedRecommender:
         user_emb = np.array(user_embedding)
         scores = []
         
-        for movie_id, movie_emb in self.movie_embeddings.items():
+        # Rank only candidates (not all movies!)
+        if candidate_ids:
+            search_ids = candidate_ids
+        else:
+            # Fallback to cached movies only
+            search_ids = list(self.movie_embeddings.keys())
+        
+        for movie_id in search_ids:
             if movie_id not in exclude_ids:
-                # Cosine similarity
-                score = self.movie_embedder.similarity(user_emb, movie_emb)
-                scores.append((movie_id, score))
+                # Get embedding (lazy)
+                movie_emb = self.get_or_create_embedding(movie_id)
+                if movie_emb is not None:
+                    # Cosine similarity
+                    score = self.movie_embedder.similarity(user_emb, movie_emb)
+                    scores.append((movie_id, score))
         
         # Sort by score descending
         scores.sort(key=lambda x: x[1], reverse=True)

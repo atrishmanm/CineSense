@@ -159,8 +159,8 @@ class DatabaseManager:
             cursor.execute(query, (min_popularity, limit))
             return cursor.fetchall()
     
-    def get_top_movies(self, limit=20, order_by='elo_score'):
-        """Get top rated movies"""
+    def get_top_movies(self, limit=20, order_by='elo_score', offset=0):
+        """Get top rated movies with pagination support"""
         valid_orders = ['elo_score', 'tmdb_rating', 'popularity']
         if order_by not in valid_orders:
             order_by = 'elo_score'
@@ -169,10 +169,10 @@ class DatabaseManager:
             SELECT * FROM movie_details 
             WHERE tmdb_rating IS NOT NULL
             ORDER BY {order_by} DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
         """
         with self.get_cursor() as cursor:
-            cursor.execute(query, (limit,))
+            cursor.execute(query, (limit, offset))
             return cursor.fetchall()
     
     def search_movies(self, search_term, limit=20):
@@ -421,8 +421,8 @@ if __name__ == "__main__":
         print("Testing database connection...")
         movie_count = db.get_movie_count()
         user_count = db.get_user_count()
-        print(f"✓ Connection successful!")
+        print(f"Connection successful!")
         print(f"  Movies in database: {movie_count}")
         print(f"  Users in database: {user_count}")
     except Exception as e:
-        print(f"✗ Connection failed: {e}")
+        print(f"Connection failed: {e}")

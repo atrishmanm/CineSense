@@ -39,7 +39,59 @@ class Config:
     METADATA_DIM = 5  # rating, popularity, year, etc.
     TOTAL_VECTOR_DIM = GENRE_DIM + DIRECTOR_DIM + ACTOR_DIM + METADATA_DIM
     
+    # Advanced AI: Latent Space Dimensionality Reduction
+    LATENT_DIM = 32  # Compressed representation (from 55 -> 32)
+    USE_DIMENSIONALITY_REDUCTION = True  # Use PCA/SVD for latent features
+    
+    # Memory & Temporal Decay
+    TEMPORAL_DECAY_FACTOR = 0.7  # Weight for recent interactions (0.7 recent + 0.3 past)
+    INTERACTION_MEMORY_WINDOW = 50  # Keep last N interactions with full weight
+    
+    # Probabilistic Decision Making
+    USE_SOFTMAX_SELECTION = True  # Use probability distributions instead of argmax
+    SOFTMAX_TEMPERATURE = 0.8  # Controls exploration (lower = more deterministic)
+    
+    # Implicit Signal Weights
+    IMPLICIT_SIGNALS = {
+        'hover_time': 0.15,      # Time spent hovering on movie
+        'skip_penalty': -0.2,    # Penalty for skipping
+        'repeat_view': 0.3,      # Bonus for repeated views
+        'session_abandon': -0.1  # Penalty for abandoned sessions
+    }
+    
     # Recommendation Settings
     RECOMMENDATION_BATCH_SIZE = 20
     COMPARISON_BATCH_SIZE = 2
     MIN_INTERACTIONS_FOR_PERSONALIZATION = 5
+    
+    # Natural Language Generation
+    ENABLE_EXPLANATIONS = True  # Generate human-readable explanations
+    EXPLANATION_DETAIL_LEVEL = 'medium'  # 'low', 'medium', 'high'
+    
+    # LAZY LOADING & INFINITE STREAM Configuration
+    
+    # Sliding Window Cache
+    MOVIE_CACHE_SIZE = 100  # Keep only 100 movies in memory
+    VECTOR_CACHE_SIZE = 500  # Cache 500 movie vectors
+    CACHE_REFILL_THRESHOLD = 0.3  # Refill when 30% full
+    
+    # Candidate Generation
+    CANDIDATE_COUNT = 300  # Generate 200-500 candidates before ranking
+    CANDIDATE_STRATEGY = 'mixed'  # 'mixed', 'genre', 'popularity', 'exploration'
+    
+    # TMDB API Pagination
+    MAX_PAGES_PER_FETCH = 10  # Fetch max 10 pages (200 movies) at a time
+    MOVIES_PER_PAGE = 20  # TMDB standard
+    
+    # Pairwise Comparison Strategy
+    PAIRWISE_KNOWN_RATIO = 0.5  # 50% known movies, 50% exploration
+    PAIRWISE_BATCH_SIZE = 30  # Generate 30 movies for pairwise pool
+    
+    # Memory Optimization
+    STORE_ONLY_INTERACTED = True  # Only save movies user interacted with
+    LAZY_EMBEDDING = True  # Compute embeddings on-demand, not precomputed
+    EVICTION_STRATEGY = 'lru'  # 'lru' (Least Recently Used)
+    
+    # Recommendation Pipeline
+    USE_CANDIDATE_GENERATION = True  # Enable candidate generation (vs scoring all)
+    FINAL_RECOMMENDATION_COUNT = 20  # Return top 20 after ranking candidates

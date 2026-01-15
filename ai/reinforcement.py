@@ -463,4 +463,4 @@ if __name__ == "__main__":
         pred = context_bandit.predict_reward(arm, context)
         print(f"  Arm {arm}: {pred:.3f}")
     
-    print("\n✓ Reinforcement learning module working correctly!")
+    print("\nReinforcement learning module working correctly!")

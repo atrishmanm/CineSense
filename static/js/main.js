@@ -132,6 +132,23 @@ const API = {
     
     async getMoviesByGenre(genre, limit = 20) {
         return this.request(`/movie/by-genre/${encodeURIComponent(genre)}?limit=${limit}`);
+    },
+    
+    // Lazy Loading Endpoints
+    async getComparisonPairLazy() {
+        return this.request('/compare/lazy');
+    },
+    
+    async getRecommendationsLazy(limit = 20, strategy = 'mixed') {
+        return this.request(`/recommendations/lazy?limit=${limit}&strategy=${strategy}`);
+    },
+    
+    async getCacheStats() {
+        return this.request('/cache/stats');
+    },
+    
+    async monitorCache() {
+        return this.request('/cache/monitor');
     }
 };
 

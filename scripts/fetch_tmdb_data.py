@@ -144,7 +144,7 @@ if __name__ == "__main__":
     target = 50 if args.test else args.count
     
     print(f"\n{'='*60}")
-    print("🎬 CINESENSE - TMDB DATA FETCHER")
+    print("CINESENSE - TMDB DATA FETCHER")
     print(f"{'='*60}")
     print(f"Target: {target} movies")
     print(f"Mode: {'TEST' if args.test else 'FULL'}")

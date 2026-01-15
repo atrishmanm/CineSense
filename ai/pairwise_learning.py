@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class PairwiseLearner:
     """
     Implements pairwise preference learning using ELO rating system
-    Similar to Netflix and Spotify's learning-to-rank algorithms
+    Similar to modern learning-to-rank algorithms used in recommendation systems
     """
     
     def __init__(self, k_factor=32, initial_rating=1500):

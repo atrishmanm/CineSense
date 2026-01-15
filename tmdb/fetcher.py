@@ -62,7 +62,24 @@ class TMDBFetcher:
         return self._make_request(endpoint, params)
     
     def discover_movies(self, **kwargs):
-        """Discover movies with filters"""
+        """
+        Discover movies with filters - INFINITE STREAM support
+        
+        Args:
+            page: Page number (1-500)
+            sort_by: Sort method (popularity.desc, vote_average.desc, etc.)
+            with_genres: Genre IDs (comma-separated or list)
+            year: Release year
+            vote_average.gte: Minimum rating
+            vote_count.gte: Minimum vote count
+            with_cast: Cast member IDs
+            with_crew: Crew member IDs (directors)
+            primary_release_date.gte: Minimum release date
+            primary_release_date.lte: Maximum release date
+        
+        Returns:
+            dict: {results: [...], page: int, total_pages: int, total_results: int}
+        """
         endpoint = "discover/movie"
         params = {
             'language': 'en-US',
@@ -74,11 +91,22 @@ class TMDBFetcher:
         
         # Add optional filters
         if 'with_genres' in kwargs:
-            params['with_genres'] = kwargs['with_genres']
+            genres = kwargs['with_genres']
+            params['with_genres'] = ','.join(map(str, genres)) if isinstance(genres, list) else genres
         if 'year' in kwargs:
             params['year'] = kwargs['year']
         if 'vote_average.gte' in kwargs:
             params['vote_average.gte'] = kwargs['vote_average.gte']
+        if 'vote_count.gte' in kwargs:
+            params['vote_count.gte'] = kwargs['vote_count.gte']
+        if 'with_cast' in kwargs:
+            params['with_cast'] = kwargs['with_cast']
+        if 'with_crew' in kwargs:
+            params['with_crew'] = kwargs['with_crew']
+        if 'primary_release_date.gte' in kwargs:
+            params['primary_release_date.gte'] = kwargs['primary_release_date.gte']
+        if 'primary_release_date.lte' in kwargs:
+            params['primary_release_date.lte'] = kwargs['primary_release_date.lte']
         
         return self._make_request(endpoint, params)
     
@@ -110,6 +138,49 @@ class TMDBFetcher:
         if not backdrop_path:
             return None
         return f"{self.image_base_url}{size}{backdrop_path}"
+    
+    def get_similar_movies(self, movie_id, page=1):
+        """Get movies similar to a given movie"""
+        endpoint = f"movie/{movie_id}/similar"
+        params = {'page': page, 'language': 'en-US'}
+        return self._make_request(endpoint, params)
+    
+    def get_recommendations(self, movie_id, page=1):
+        """Get recommended movies based on a movie"""
+        endpoint = f"movie/{movie_id}/recommendations"
+        params = {'page': page, 'language': 'en-US'}
+        return self._make_request(endpoint, params)
+    
+    def stream_movies(self, filters=None, max_pages=10):
+        """
+        LAZY LOADING: Stream movies page by page
+        
+        This is a generator - fetches on demand, never loads all at once
+        
+        Args:
+            filters: dict of discovery filters
+            max_pages: Maximum pages to fetch (default 10 = 200 movies)
+        
+        Yields:
+            dict: Movie data one at a time
+        """
+        filters = filters or {}
+        
+        for page in range(1, max_pages + 1):
+            filters['page'] = page
+            data = self.discover_movies(**filters)
+            
+            if not data or 'results' not in data:
+                break
+            
+            for movie in data['results']:
+                yield movie
+            
+            # Stop if we've reached the last page
+            if page >= data.get('total_pages', 0):
+                break
+            
+            time.sleep(0.25)  # Rate limiting
     
     def parse_movie_data(self, movie_json):
         """Parse TMDB movie JSON into database format"""

@@ -1,12 +1,19 @@
 """
 Main Recommendation Engine
-Combines all three AI layers for intelligent recommendations
+Combines all AI layers + Advanced features + Lazy Loading
 """
 
 import numpy as np
 from ai.pairwise_learning import PairwiseLearner, UserPreferenceModel
 from ai.embeddings import MovieEmbedding, UserEmbedding, FeatureEncoder, ContentBasedRecommender
 from ai.reinforcement import UCBBandit
+from ai.advanced_ai import (
+    LatentSpaceEncoder, ImplicitSignalProcessor, ProbabilisticSelector,
+    TemporalMemoryManager, NaturalLanguageExplainer
+)
+from ai.cache_manager import cache_manager
+from ai.candidate_generator import candidate_generator
+from tmdb.fetcher import TMDBFetcher
 from database.db_manager import db
 from config import Config
 import logging
@@ -18,7 +25,7 @@ logger = logging.getLogger(__name__)
 class CineSenseRecommender:
     """
     Main recommendation engine
-    Integrates pairwise learning, embeddings, and reinforcement learning
+    Integrates: Pairwise learning, embeddings, RL + Advanced AI + Lazy Loading
     """
     
     def __init__(self):
@@ -30,7 +37,7 @@ class CineSenseRecommender:
             initial_rating=Config.INITIAL_ELO_SCORE
         )
         
-        # AI Layer 2: Content-based filtering
+        # AI Layer 2: Content-based filtering (with lazy loading)
         self.movie_embedder = MovieEmbedding()
         self.content_recommender = ContentBasedRecommender()
         
@@ -43,11 +50,23 @@ class CineSenseRecommender:
         # AI Layer 3: Reinforcement Learning
         self.bandit = UCBBandit(c=2.0)
         
+        # Advanced AI Components
+        self.latent_encoder = LatentSpaceEncoder() if Config.USE_DIMENSIONALITY_REDUCTION else None
+        self.implicit_processor = ImplicitSignalProcessor()
+        self.prob_selector = ProbabilisticSelector() if Config.USE_SOFTMAX_SELECTION else None
+        self.memory_manager = TemporalMemoryManager()
+        self.nlg_explainer = NaturalLanguageExplainer() if Config.ENABLE_EXPLANATIONS else None
+        
+        # LAZY LOADING Components
+        self.cache = cache_manager  # Sliding window cache
+        self.candidate_gen = candidate_generator  # Candidate generation
+        self.tmdb = TMDBFetcher()  # Infinite movie stream
+        
         # User-specific models
         self.user_models = {}  # user_id -> UserPreferenceModel
         self.user_embeddings = {}  # user_id -> UserEmbedding
         
-        logger.info("CineSense Recommender initialized")
+        logger.info("CineSense Recommender initialized with advanced AI features")
     
     def _fit_encoders_if_needed(self):
         """Fit encoders on first use"""
@@ -424,6 +443,439 @@ class CineSenseRecommender:
         except Exception as e:
             logger.error(f"Error generating explanation: {e}")
             return "Recommended based on your viewing preferences."
+    
+    def get_advanced_recommendations(self, user_id, n=20, include_explanations=True):
+        """
+        Advanced recommendations using all enhanced AI features
+        - Latent space representations
+        - Probabilistic selection
+        - Temporal memory
+        - Natural language explanations
+        
+        Args:
+            user_id: User identifier
+            n: Number of recommendations
+            include_explanations: Whether to generate NLG explanations
+        
+        Returns:
+            List of movies with scores and explanations
+        """
+        try:
+            # Get user interaction history with temporal weights
+            interactions = db.get_user_interactions(user_id, limit=100)
+            
+            if not interactions or len(interactions) < Config.MIN_INTERACTIONS_FOR_PERSONALIZATION:
+                logger.info(f"User {user_id} needs more interactions for advanced recommendations")
+                return self.get_recommendations(user_id, n)
+            
+            # Apply temporal decay to interactions
+            weighted_interactions = self.memory_manager.apply_temporal_weights(interactions)
+            
+            # Build user preference profile with temporal weighting
+            user_vector = self._build_temporal_user_vector(weighted_interactions)
+            
+            # Get candidate movies
+            all_movies = db.get_top_movies(limit=500)
+            
+            # Filter out already seen
+            seen_ids = set()
+            for inter in interactions:
+                seen_ids.add(inter.get('movie_1_id'))
+                seen_ids.add(inter.get('movie_2_id'))
+            
+            candidates = [m for m in all_movies if m['movie_id'] not in seen_ids]
+            
+            # Score each movie
+            movie_scores = []
+            for movie in candidates:
+                # Get movie embedding
+                movie_emb = self._movie_to_embedding(movie)
+                
+                # Transform to latent space if enabled
+                if self.latent_encoder and self.latent_encoder.is_fitted:
+                    movie_latent = self.latent_encoder.transform(movie_emb)
+                    user_latent = self.latent_encoder.transform(user_vector)
+                    # Compute similarity in latent space
+                    content_score = np.dot(user_latent, movie_latent) / (
+                        np.linalg.norm(user_latent) * np.linalg.norm(movie_latent) + 1e-8
+                    )
+                else:
+                    content_score = np.dot(user_vector, movie_emb) / (
+                        np.linalg.norm(user_vector) * np.linalg.norm(movie_emb) + 1e-8
+                    )
+                
+                # Preference score from pairwise learning
+                user_model = self._get_user_model(user_id)
+                preference_score = user_model.get_preference_score(movie['movie_id'])
+                
+                # Combined score
+                final_score = 0.5 * content_score + 0.3 * preference_score + 0.2 * (movie.get('elo_score', 1500) / 3000)
+                
+                movie_scores.append({
+                    **movie,
+                    'recommendation_score': final_score,
+                    'content_score': content_score,
+                    'preference_score': preference_score
+                })
+            
+            # Use probabilistic selection if enabled
+            if self.prob_selector and Config.USE_SOFTMAX_SELECTION:
+                scores = [m['recommendation_score'] for m in movie_scores]
+                selected_indices = self.prob_selector.select_with_probability(scores, top_k=n)
+                recommendations = [movie_scores[i] for i in selected_indices]
+            else:
+                # Deterministic: sort by score
+                movie_scores.sort(key=lambda x: x['recommendation_score'], reverse=True)
+                recommendations = movie_scores[:n]
+            
+            # Generate natural language explanations
+            if include_explanations and self.nlg_explainer:
+                user_profile = self._build_user_taste_profile(weighted_interactions)
+                for rec in recommendations:
+                    preference_factors = {
+                        'preferred_genres': user_profile.get('top_genres', []),
+                        'favorite_directors': user_profile.get('top_directors', []),
+                        'pacing_preference': user_profile.get('pacing', 'balanced')
+                    }
+                    rec['explanation'] = self.nlg_explainer.explain_recommendation(
+                        rec, user_profile, rec['content_score'], preference_factors
+                    )
+            
+            return recommendations
+            
+        except Exception as e:
+            logger.error(f"Error in advanced recommendations: {e}")
+            return self.get_recommendations(user_id, n)
+    
+    def _build_temporal_user_vector(self, weighted_interactions):
+        """Build user vector with temporal weighting"""
+        if not weighted_interactions:
+            return np.zeros(Config.TOTAL_VECTOR_DIM)
+        
+        # Weight recent interactions more heavily
+        recent_vectors = []
+        weights = []
+        
+        for inter in weighted_interactions[:20]:  # Top 20 recent
+            movie_id = inter.get('chosen_movie_id') or inter.get('movie_1_id')
+            if movie_id:
+                movie = db.get_movie_by_id(movie_id)
+                if movie:
+                    emb = self._movie_to_embedding(movie)
+                    recent_vectors.append(emb)
+                    weights.append(inter.get('temporal_weight', 1.0))
+        
+        if not recent_vectors:
+            return np.zeros(Config.TOTAL_VECTOR_DIM)
+        
+        # Weighted average
+        weights = np.array(weights)
+        weights = weights / weights.sum()
+        
+        user_vector = np.average(recent_vectors, axis=0, weights=weights)
+        return user_vector
+    
+    def _build_user_taste_profile(self, interactions):
+        """Extract interpretable taste profile for NLG"""
+        profile = {}
+        
+        # Collect genres, directors from chosen movies
+        genres_count = {}
+        directors_count = {}
+        years = []
+        ratings = []
+        
+        for inter in interactions[:30]:
+            movie_id = inter.get('chosen_movie_id')
+            if movie_id:
+                movie = db.get_movie_by_id(movie_id)
+                if movie:
+                    # Count genres
+                    if movie.get('genres'):
+                        for genre in movie['genres'].split(','):
+                            genre = genre.strip()
+                            genres_count[genre] = genres_count.get(genre, 0) + 1
+                    
+                    # Count directors
+                    if movie.get('directors'):
+                        for director in movie['directors'].split(','):
+                            director = director.strip()
+                            directors_count[director] = directors_count.get(director, 0) + 1
+                    
+                    # Track years and ratings
+                    if movie.get('release_year'):
+                        years.append(movie['release_year'])
+                    if movie.get('tmdb_rating'):
+                        ratings.append(float(movie['tmdb_rating']))
+        
+        # Top genres
+        profile['top_genres'] = sorted(genres_count.keys(), key=genres_count.get, reverse=True)[:3]
+        
+        # Top directors
+        profile['top_directors'] = sorted(directors_count.keys(), key=directors_count.get, reverse=True)[:2]
+        
+        # Average year
+        profile['avg_release_year'] = int(np.mean(years)) if years else 2000
+        
+        # Average rating preference
+        profile['avg_rating_preference'] = np.mean(ratings) if ratings else 7.0
+        
+        # Infer pacing (heuristic based on genres)
+        action_count = genres_count.get('Action', 0) + genres_count.get('Thriller', 0)
+        drama_count = genres_count.get('Drama', 0) + genres_count.get('Mystery', 0)
+        
+        if action_count > drama_count * 1.5:
+            profile['pacing'] = 'fast-paced'
+        elif drama_count > action_count * 1.5:
+            profile['pacing'] = 'slow-burn'
+        else:
+            profile['pacing'] = 'balanced'
+        
+        return profile
+    
+    def get_taste_summary(self, user_id):
+        """
+        Generate natural language taste personality summary
+        """
+        if not self.nlg_explainer:
+            return "Explanations not enabled"
+        
+        interactions = db.get_user_interactions(user_id, limit=50)
+        if not interactions:
+            return "Not enough data to build your taste profile yet."
+        
+        weighted = self.memory_manager.apply_temporal_weights(interactions)
+        profile = self._build_user_taste_profile(weighted)
+        
+        return self.nlg_explainer.generate_taste_summary(profile)
+    
+    def get_comparison_pair_lazy(self, user_id=None):
+        """
+        LAZY LOADING: Get pairwise comparison using infinite stream
+        
+        Infinite Pairwise Strategy:
+        - 50% known-preference movies (from user history or popular)
+        - 50% unexplored movies (from TMDB API)
+        
+        This gives: Learning + Exploration + Infinite content
+        
+        Returns:
+            Tuple of two movie dictionaries
+        """
+        try:
+            # Check cache status
+            if self.cache.needs_refill(threshold=0.3):
+                logger.info("Cache low - refilling from TMDB API...")
+                self._refill_cache(user_id)
+            
+            # Generate pairwise candidates
+            candidates = self.candidate_gen.generate_pairwise_candidates(
+                user_id=user_id,
+                count=Config.PAIRWISE_BATCH_SIZE
+            )
+            
+            # Pick 1 known + 1 explore
+            known_movies = candidates.get('known', [])
+            explore_movies = candidates.get('explore', [])
+            
+            if not known_movies or not explore_movies:
+                # Fallback to cache
+                cached_movies = self.cache.movie_cache.get_all_movies()
+                if len(cached_movies) >= 2:
+                    import random
+                    selected = random.sample(cached_movies, 2)
+                    return selected[0], selected[1]
+                else:
+                    logger.error("Not enough movies for comparison")
+                    return None, None
+            
+            # Random selection
+            import random
+            movie1 = random.choice(known_movies)
+            movie2 = random.choice(explore_movies)
+            
+            # Cache these movies
+            self.cache.put_movie(movie1.get('id') or movie1.get('movie_id'), movie1)
+            self.cache.put_movie(movie2.get('id') or movie2.get('movie_id'), movie2)
+            
+            return movie1, movie2
+            
+        except Exception as e:
+            logger.error(f"Error in lazy comparison pair: {e}")
+            return None, None
+    
+    def get_recommendations_lazy(self, user_id, n=20):
+        """
+        LAZY LOADING: Get recommendations using candidate generation
+        
+        Production-Ready Strategy:
+        1. Generate 200-500 candidates (not all movies!)
+        2. Rank only candidates
+        3. Return top N
+        
+        This is how real systems work!
+        
+        Args:
+            user_id: User identifier
+            n: Number of recommendations (default 20)
+        
+        Returns:
+            List of movie dictionaries with scores
+        """
+        try:
+            # Step 1: Generate candidates (200-500 movies, not all!)
+            candidates = self.candidate_gen.generate_candidates(
+                user_id=user_id,
+                target_count=Config.CANDIDATE_COUNT,
+                strategy=Config.CANDIDATE_STRATEGY
+            )
+            
+            if not candidates:
+                logger.warning("No candidates generated, falling back to cache")
+                candidates = self.cache.movie_cache.get_all_movies()
+            
+            # Extract candidate IDs
+            candidate_ids = [m.get('id') or m.get('movie_id') for m in candidates]
+            
+            # Step 2: Get user embedding (if exists)
+            user_model = self._get_user_model(user_id)
+            
+            if not user_model.has_enough_data(Config.MIN_INTERACTIONS_FOR_PERSONALIZATION):
+                # Cold start: return popular from candidates
+                logger.info(f"User {user_id} cold start - returning popular candidates")
+                # Sort by popularity
+                candidates_sorted = sorted(
+                    candidates,
+                    key=lambda x: x.get('popularity', 0),
+                    reverse=True
+                )
+                return candidates_sorted[:n]
+            
+            # Step 3: Rank candidates (not all movies!)
+            user_embedding = self._get_user_embedding(user_id)
+            user_vector = user_embedding.get_embedding()
+            
+            # Initialize encoders if needed
+            if not self.content_recommender.genre_encoder:
+                self._fit_encoders_from_candidates(candidates)
+                self.content_recommender.initialize_encoders(
+                    self.genre_encoder,
+                    self.director_encoder,
+                    self.actor_encoder
+                )
+            
+            # Rank candidates using content-based filtering
+            ranked = self.content_recommender.recommend_for_user(
+                user_embedding=user_vector,
+                candidate_ids=candidate_ids,
+                n=n
+            )
+            
+            # Convert IDs back to full movie data
+            id_to_movie = {(m.get('id') or m.get('movie_id')): m for m in candidates}
+            recommendations = []
+            
+            for movie_id, score in ranked:
+                if movie_id in id_to_movie:
+                    movie = id_to_movie[movie_id].copy()
+                    movie['recommendation_score'] = float(score)
+                    recommendations.append(movie)
+            
+            return recommendations[:n]
+            
+        except Exception as e:
+            logger.error(f"Error in lazy recommendations: {e}")
+            # Fallback to cached movies
+            return self.cache.movie_cache.get_all_movies()[:n]
+    
+    def _refill_cache(self, user_id=None):
+        """
+        Refill sliding window cache from TMDB API
+        
+        Fetches next batch when cache runs low
+        """
+        try:
+            # Determine how many movies to fetch
+            current_size = self.cache.movie_cache.size()
+            target_size = Config.MOVIE_CACHE_SIZE
+            fetch_count = target_size - current_size
+            
+            if fetch_count <= 0:
+                return
+            
+            logger.info(f"Refilling cache: need {fetch_count} movies")
+            
+            # Get user's favorite genres if available
+            filters = {}
+            if user_id:
+                try:
+                    # Get user's favorite genres
+                    interactions = db.get_user_interactions(user_id, limit=20)
+                    if interactions:
+                        # Placeholder: would analyze genres from interactions
+                        pass
+                except Exception as e:
+                    logger.error(f"Error getting user preferences: {e}")
+            
+            # Fetch movies from TMDB
+            pages_needed = (fetch_count // 20) + 1
+            movies_fetched = []
+            
+            for page in range(1, min(pages_needed + 1, Config.MAX_PAGES_PER_FETCH + 1)):
+                data = self.tmdb.discover_movies(page=page, **filters)
+                
+                if data and 'results' in data:
+                    movies_fetched.extend(data['results'])
+                
+                if len(movies_fetched) >= fetch_count:
+                    break
+            
+            # Add to cache
+            self.cache.movie_cache.bulk_put(movies_fetched[:fetch_count])
+            
+            logger.info(f"Cache refilled: added {min(fetch_count, len(movies_fetched))} movies")
+            
+        except Exception as e:
+            logger.error(f"Error refilling cache: {e}")
+    
+    def _fit_encoders_from_candidates(self, candidates):
+        """
+        Fit feature encoders from candidate movies
+        
+        Lazy fitting - only when needed
+        """
+        if self.encoders_fitted:
+            return
+        
+        try:
+            # Extract features from candidates
+            all_genres = []
+            all_directors = []
+            all_actors = []
+            
+            for movie in candidates:
+                genres = movie.get('genre_ids', []) or movie.get('genres', [])
+                all_genres.append([str(g) if isinstance(g, int) else g.get('name', g) for g in genres])
+                
+                # Directors and actors would need additional API calls
+                # For now, use empty lists
+                all_directors.append([])
+                all_actors.append([])
+            
+            # Fit encoders
+            self.genre_encoder.fit(all_genres)
+            self.director_encoder.fit(all_directors)
+            self.actor_encoder.fit(all_actors)
+            
+            self.encoders_fitted = True
+            logger.info("Encoders fitted from candidates")
+            
+        except Exception as e:
+            logger.error(f"Error fitting encoders: {e}")
+    
+    def get_cache_stats(self):
+        """Get cache statistics for monitoring"""
+        return self.cache.get_stats()
 
 
 # Singleton instance
@@ -443,9 +895,9 @@ if __name__ == "__main__":
         if movie1 and movie2:
             print(f"Movie 1: {movie1['title']}")
             print(f"Movie 2: {movie2['title']}")
-            print("✓ Comparison pair generated")
+            print("Comparison pair generated")
         else:
-            print("✗ Could not generate comparison pair")
+            print("Could not generate comparison pair")
             print("  (This is expected if database is empty)")
         
     except Exception as e:

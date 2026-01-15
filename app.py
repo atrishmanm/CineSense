@@ -88,6 +88,16 @@ def create_app():
         """Search page"""
         return render_template('search.html')
     
+    @app.route('/monitor')
+    def cache_monitor():
+        """Cache monitoring dashboard"""
+        return render_template('cache_monitor.html')
+    
+    @app.route('/favicon.ico')
+    def favicon():
+        """Suppress favicon 404 errors"""
+        return '', 204
+    
     # ==========================================================================
     # ERROR HANDLERS
     # ==========================================================================
@@ -121,7 +131,7 @@ def create_app():
     
     # Startup logging (removed before_first_request as it's deprecated in Flask 3.0)
     logger.info("=" * 60)
-    logger.info("🎬 CINESENSE - AI Movie Recommendation Platform")
+    logger.info("CINESENSE - AI Movie Recommendation Platform")
     logger.info("=" * 60)
     logger.info("Application initialized successfully")
     logger.info(f"Debug mode: {Config.DEBUG}")
@@ -135,7 +145,7 @@ def main():
     app = create_app()
     
     print("\n" + "=" * 60)
-    print("🎬 CINESENSE - AI Movie Recommendation Platform")
+    print("CINESENSE - AI Movie Recommendation Platform")
     print("=" * 60)
     print(f"Server running on: http://localhost:{Config.PORT}")
     print(f"API documentation: http://localhost:{Config.PORT}/api")

@@ -4,7 +4,7 @@
 
 {% block content %}
 
-<!-- Hero Banner (Netflix/Prime Style) -->
+<!-- Hero Banner (Streaming Platform Style) -->
 <section id="hero-banner" class="relative -mt-20 pt-20" style="height: calc(90vh + 5rem);">
     <!-- Loading State -->
     <div id="hero-loading" class="h-full flex items-center justify-center">
@@ -90,26 +90,39 @@
                 </a>
             </div>
             <div id="recommendations-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+            <div class="text-center mt-6">
+                <button id="load-more-recommendations" onclick="loadMoreRecommendations()" class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition">
+                    Load More Recommendations
+                </button>
+            </div>
         </div>
         
         <!-- Top Rated Movies -->
         <div>
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-2xl md:text-3xl font-bold">Top Rated on CineSense</h2>
-                <button class="text-gray-400 hover:text-white transition text-sm">See All →</button>
             </div>
             <div id="top-rated-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+            <div class="text-center mt-6">
+                <button id="load-more-top-rated" onclick="loadMoreTopRated()" class="px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition">
+                    Load More Top Rated
+                </button>
+            </div>
         </div>
         
         <!-- Trending Now -->
         <div>
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-2xl md:text-3xl font-bold flex items-center">
-                    <span class="text-3xl mr-2">🔥</span>
                     Trending Now
                 </h2>
             </div>
             <div id="trending-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+            <div class="text-center mt-6">
+                <button id="load-more-trending" onclick="loadMoreTrending()" class="px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition">
+                    Load More Trending
+                </button>
+            </div>
         </div>
         
         <!-- Popular This Week -->
@@ -118,6 +131,11 @@
                 <h2 class="text-2xl md:text-3xl font-bold">Popular This Week</h2>
             </div>
             <div id="popular-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+            <div class="text-center mt-6">
+                <button id="load-more-popular" onclick="loadMorePopular()" class="px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition">
+                    Load More Popular
+                </button>
+            </div>
         </div>
         
         <!-- Start Comparing CTA -->
@@ -130,6 +148,17 @@
                 Start Comparing Movies
             </a>
         </div>
+        
+        <!-- Infinite Loading Indicator -->
+        <div id="infinite-loading-indicator" class="hidden fixed bottom-8 right-8 bg-indigo-600 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+            <div class="flex items-center gap-3">
+                <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="font-semibold">Loading more movies from TMDB...</span>
+            </div>
+        </div>
     </div>
 </section>
 
@@ -138,6 +167,11 @@
 {% block scripts %}
 <script>
     let currentHeroMovie = null;
+    let recommendationsOffset = 20;
+    let topRatedOffset = 20;
+    let trendingOffset = 20;
+    let popularOffset = 20;
+    let isLoading = false;
 
     document.addEventListener('DOMContentLoaded', async () => {
         await Promise.all([
@@ -147,7 +181,208 @@
             loadTrending(),
             loadPopular()
         ]);
+        
+        // Initialize infinite scroll
+        initializeInfiniteScroll();
+        
+        // Initialize lazy loading manager if available
+        if (typeof LazyLoadingManager !== 'undefined') {
+            await LazyLoadingManager.initialize();
+        }
     });
+    
+    function initializeInfiniteScroll() {
+        let scrollTimeout;
+        window.addEventListener('scroll', () => {
+            if (scrollTimeout) clearTimeout(scrollTimeout);
+            
+            scrollTimeout = setTimeout(() => {
+                const scrollPosition = window.innerHeight + window.scrollY;
+                const documentHeight = document.documentElement.scrollHeight;
+                
+                // Load more when 80% down the page
+                if (scrollPosition >= documentHeight * 0.8 && !isLoading) {
+                    loadMoreContent();
+                }
+            }, 100);
+        });
+    }
+    
+    async function loadMoreContent() {
+        // Load more for all sections automatically
+        const promises = [];
+        
+        if (document.getElementById('personalized-section').classList.contains('hidden') === false) {
+            promises.push(loadMoreRecommendations());
+        }
+        
+        promises.push(loadMoreTopRated());
+        promises.push(loadMoreTrending());
+        promises.push(loadMorePopular());
+        
+        await Promise.all(promises);
+    }
+    
+    async function loadMoreRecommendations() {
+        if (isLoading) return;
+        isLoading = true;
+        
+        const button = document.getElementById('load-more-recommendations');
+        const indicator = document.getElementById('infinite-loading-indicator');
+        button.textContent = 'Loading...';
+        button.disabled = true;
+        indicator.classList.remove('hidden');
+        
+        try {
+            const response = await fetch(`/api/recommendations/lazy?limit=20&offset=${recommendationsOffset}`);
+            const data = await response.json();
+            
+            if (data.movies && data.movies.length > 0) {
+                const container = document.getElementById('recommendations-container');
+                container.innerHTML += data.movies.map(createStreamingCard).join('');
+                recommendationsOffset += data.movies.length;
+                
+                console.log(`✓ Loaded ${data.movies.length} more recommendations via lazy loading (total: ${recommendationsOffset})`);
+            } else {
+                button.textContent = 'No More Movies';
+                button.disabled = true;
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading more recommendations:', error);
+        } finally {
+            button.textContent = 'Load More Recommendations';
+            button.disabled = false;
+            indicator.classList.add('hidden');
+            isLoading = false;
+        }
+    }
+    
+    async function loadMoreTopRated() {
+        console.log('loadMoreTopRated called! Current offset:', topRatedOffset);
+        
+        if (isLoading) {
+            console.log('Already loading, skipping...');
+            return;
+        }
+        isLoading = true;
+        
+        const button = document.getElementById('load-more-top-rated');
+        const indicator = document.getElementById('infinite-loading-indicator');
+        
+        if (!button) {
+            console.error('Button not found!');
+            isLoading = false;
+            return;
+        }
+        
+        button.textContent = 'Loading...';
+        button.disabled = true;
+        indicator.classList.remove('hidden');
+        
+        try {
+            const url = `/api/movie/top-rated?order_by=tmdb_rating&limit=20&offset=${topRatedOffset}`;
+            console.log('Fetching:', url);
+            
+            const response = await fetch(url);
+            console.log('Response status:', response.status);
+            
+            const data = await response.json();
+            console.log('Data received:', data);
+            
+            if (data.movies && data.movies.length > 0) {
+                const container = document.getElementById('top-rated-container');
+                const newCards = data.movies.map(createStreamingCard).join('');
+                container.innerHTML += newCards;
+                topRatedOffset += data.movies.length;
+                
+                console.log(`✓ Loaded ${data.movies.length} more top rated (total offset: ${topRatedOffset})`);
+            } else {
+                console.log('No more movies available');
+                button.textContent = 'No More Movies';
+                button.disabled = true;
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading more top rated:', error);
+            alert('Error loading more movies: ' + error.message);
+        } finally {
+            button.textContent = 'Load More Top Rated';
+            button.disabled = false;
+            indicator.classList.add('hidden');
+            isLoading = false;
+        }
+    }
+    
+    async function loadMoreTrending() {
+        if (isLoading) return;
+        isLoading = true;
+        
+        const button = document.getElementById('load-more-trending');
+        const indicator = document.getElementById('infinite-loading-indicator');
+        button.textContent = 'Loading...';
+        button.disabled = true;
+        indicator.classList.remove('hidden');
+        
+        try {
+            const response = await fetch(`/api/movie/top-rated?order_by=elo_score&limit=20&offset=${trendingOffset}`);
+            const data = await response.json();
+            
+            if (data.movies && data.movies.length > 0) {
+                const container = document.getElementById('trending-container');
+                container.innerHTML += data.movies.map(createStreamingCard).join('');
+                trendingOffset += data.movies.length;
+                
+                console.log(`✓ Loaded ${data.movies.length} more trending (total: ${trendingOffset})`);
+            } else {
+                button.textContent = 'No More Movies';
+                button.disabled = true;
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading more trending:', error);
+        } finally {
+            button.textContent = 'Load More Trending';
+            button.disabled = false;
+            indicator.classList.add('hidden');
+            isLoading = false;
+        }
+    }
+    
+    async function loadMorePopular() {
+        if (isLoading) return;
+        isLoading = true;
+        
+        const button = document.getElementById('load-more-popular');
+        const indicator = document.getElementById('infinite-loading-indicator');
+        button.textContent = 'Loading...';
+        button.disabled = true;
+        indicator.classList.remove('hidden');
+        
+        try {
+            const response = await fetch(`/api/movie/top-rated?order_by=popularity&limit=20&offset=${popularOffset}`);
+            const data = await response.json();
+            
+            if (data.movies && data.movies.length > 0) {
+                const container = document.getElementById('popular-container');
+                container.innerHTML += data.movies.map(createStreamingCard).join('');
+                popularOffset += data.movies.length;
+                
+                console.log(`✓ Loaded ${data.movies.length} more popular (total: ${popularOffset})`);
+            } else {
+                button.textContent = 'No More Movies';
+                button.disabled = true;
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading more popular:', error);
+        } finally {
+            button.textContent = 'Load More Popular';
+            button.disabled = false;
+            indicator.classList.add('hidden');
+            isLoading = false;
+        }
+    }
 
     async function loadHero() {
         try {
@@ -275,7 +510,7 @@
                             </div>
                             <h3 class="font-bold text-sm line-clamp-2">${movie.title}</h3>
                         </div>
-                    </div>process
+                    </div>
                 </div>
             </div>
         `;
