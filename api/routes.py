@@ -283,6 +283,40 @@ def get_user_interactions_api():
         return jsonify({'error': 'Internal server error'}), 500
 
 
+@api.route('/user/compared-movies', methods=['GET'])
+def get_compared_movies():
+    """Get all movies that user has compared"""
+    try:
+        user_id = session.get('user_id')
+        
+        if not user_id:
+            return jsonify({'movies': []}), 200
+        
+        # Get all interactions to find compared movies
+        interactions = db.get_user_interactions(user_id, limit=10000)
+        
+        # Collect unique movie IDs from interactions
+        compared_ids = set()
+        for interaction in interactions:
+            if interaction.get('movie_1_id'):
+                compared_ids.add(interaction['movie_1_id'])
+            if interaction.get('movie_2_id'):
+                compared_ids.add(interaction['movie_2_id'])
+        
+        # Get movie details
+        movies = []
+        for movie_id in compared_ids:
+            movie = db.get_movie_by_id(movie_id)
+            if movie:
+                movies.append(movie)
+        
+        return jsonify({'movies': movies, 'count': len(movies)}), 200
+        
+    except Exception as e:
+        logger.error(f"Compared movies error: {e}")
+        return jsonify({'movies': []}), 200
+
+
 # ============================================================================
 # RECOMMENDATION ENDPOINTS
 # ============================================================================
@@ -498,6 +532,85 @@ def get_movie_detail(movie_id):
         if not movie:
             return jsonify({'error': 'Movie not found'}), 404
         
+        return jsonify(movie), 200
+        
+    except Exception as e:
+        logger.error(f"Movie detail error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@api.route('/movie/by-genre', methods=['GET'])
+def get_movies_by_genre():
+    """Get movies filtered by genre and media type"""
+    try:
+        genre = request.args.get('genre', '')
+        media_type = request.args.get('media_type', 'all')
+        limit = request.args.get('limit', 20, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        
+        logger.info(f"Getting movies by genre: {genre}, media_type: {media_type}, offset: {offset}")
+        
+        # If no genre specified, get all movies
+        if not genre or genre == 'all' or genre == '':
+            movies = db.get_top_movies(limit=limit, offset=offset, media_type=media_type)
+        else:
+            movies = db.get_movies_by_genre_and_type(
+                genre_name=genre,
+                media_type=media_type,
+                limit=limit,
+                offset=offset
+            )
+        
+        return jsonify({
+            'success': True,
+            'movies': movies,
+            'genre': genre,
+            'media_type': media_type,
+            'count': len(movies)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Get movies by genre error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to get movies'}), 500
+
+
+@api.route('/search/ai', methods=['POST'])
+def ai_search():
+    """AI-powered semantic search using embeddings"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        
+        if not query:
+            return jsonify({'error': 'Query required'}), 400
+        
+        limit = data.get('limit', 20)
+        include_tv = data.get('include_tv', True)
+        
+        logger.info(f"AI search query: {query}, limit: {limit}")
+        
+        # Use recommender's search capabilities
+        results = recommender.semantic_search(
+            query=query,
+            n=limit,
+            include_tv_series=include_tv
+        )
+        
+        return jsonify({
+            'results': results,
+            'query': query,
+            'count': len(results),
+            'ai_powered': True
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"AI search error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Search failed'}), 500
+        
         # Add explanation if user is logged in
         explanation = None
         user_id = session.get('user_id')
@@ -537,24 +650,6 @@ def search_movies():
         return jsonify({'error': 'Internal server error'}), 500
 
 
-@api.route('/movie/by-genre/<genre>', methods=['GET'])
-def get_movies_by_genre(genre):
-    """Get movies by genre"""
-    try:
-        limit = request.args.get('limit', 20, type=int)
-        movies = db.get_movies_by_genre(genre, limit=limit)
-        
-        return jsonify({
-            'genre': genre,
-            'movies': movies,
-            'count': len(movies)
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Genre movies error: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-
 @api.route('/movie/top-rated', methods=['GET'])
 def get_top_rated():
     """Get top-rated movies with pagination support - fetches from TMDB on-demand"""
@@ -562,9 +657,10 @@ def get_top_rated():
         limit = request.args.get('limit', 20, type=int)
         offset = request.args.get('offset', 0, type=int)
         order_by = request.args.get('order_by', 'elo_score')
+        media_type = request.args.get('media_type', 'all')
         
         # First, try to get movies from database
-        movies = db.get_top_movies(limit=limit, order_by=order_by, offset=offset)
+        movies = db.get_top_movies(limit=limit, order_by=order_by, offset=offset, media_type=media_type)
         
         # If database doesn't have enough movies, fetch from TMDB
         if len(movies) < limit:
@@ -574,13 +670,19 @@ def get_top_rated():
             # Calculate which TMDB page to fetch
             tmdb_page = (offset // 20) + 1
             
-            # Fetch from TMDB based on order_by
-            if order_by == 'popularity':
-                data = fetcher.get_popular_movies(page=tmdb_page)
-            elif order_by == 'tmdb_rating':
-                data = fetcher.get_top_rated_movies(page=tmdb_page)
-            else:  # elo_score or default
-                data = fetcher.get_popular_movies(page=tmdb_page)
+            # Fetch from TMDB based on order_by and media_type
+            if media_type == 'tv':
+                if order_by == 'popularity':
+                    data = fetcher.get_popular_tv_series(page=tmdb_page)
+                else:
+                    data = fetcher.get_top_rated_tv_series(page=tmdb_page)
+            else:  # movie or all
+                if order_by == 'popularity':
+                    data = fetcher.get_popular_movies(page=tmdb_page)
+                elif order_by == 'tmdb_rating':
+                    data = fetcher.get_top_rated_movies(page=tmdb_page)
+                else:  # elo_score or default
+                    data = fetcher.get_popular_movies(page=tmdb_page)
             
             tmdb_movies = data.get('results', []) if data else []
             
@@ -588,6 +690,9 @@ def get_top_rated():
             for movie in tmdb_movies:
                 try:
                     movie_data = fetcher.parse_movie_data(movie)
+                    # Set media_type for TV series
+                    if media_type == 'tv' and 'media_type' not in movie_data:
+                        movie_data['media_type'] = 'tv'
                     db.insert_movie(movie_data)
                     
                     # Store genres

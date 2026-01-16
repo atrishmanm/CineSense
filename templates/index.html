@@ -4,74 +4,76 @@
 
 {% block content %}
 
-<!-- Hero Banner (Streaming Platform Style) -->
-<section id="hero-banner" class="relative -mt-20 pt-20" style="height: calc(90vh + 5rem);">
-    <!-- Loading State -->
-    <div id="hero-loading" class="h-full flex items-center justify-center">
-        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600"></div>
+<!-- Hero Carousel Section -->
+<section class="relative h-[600px] md:h-[700px] overflow-hidden">
+    <div id="hero-carousel" class="relative h-full">
+        <!-- Carousel slides will be loaded here -->
+        <div id="carousel-track" class="flex h-full transition-transform duration-500 ease-out"></div>
+        
+        <!-- Navigation Arrows -->
+        <button id="prev-slide" class="absolute left-4 top-1/2 -translate-y-1/2 z-20 bg-black/50 hover:bg-black/70 rounded-full p-3 transition">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+        </button>
+        <button id="next-slide" class="absolute right-4 top-1/2 -translate-y-1/2 z-20 bg-black/50 hover:bg-black/70 rounded-full p-3 transition">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+        </button>
+        
+        <!-- Dots Indicator -->
+        <div id="carousel-dots" class="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 flex gap-2"></div>
     </div>
-    
-    <!-- Hero Content -->
-    <div id="hero-content" class="hidden h-full">
-        <!-- Backdrop Image -->
-        <div id="hero-backdrop" class="absolute inset-0 bg-cover bg-center bg-no-repeat"></div>
-        
-        <!-- Gradient Overlays -->
-        <div class="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-transparent"></div>
-        <div class="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-gray-950 to-transparent"></div>
-        
-        <!-- Content -->
-        <div class="relative h-full flex items-center">
-            <div class="container mx-auto px-8 md:px-12">
-                <div class="max-w-3xl space-y-3">
-                    <!-- Title -->
-                    <h1 id="hero-title" class="text-4xl md:text-6xl font-black drop-shadow-2xl"></h1>
-                    
-                    <!-- Meta Info -->
-                    <div class="flex items-center gap-3 text-sm md:text-base">
-                        <div class="flex items-center bg-yellow-500 text-black px-2.5 py-1 rounded font-bold text-sm">
-                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
-                            </svg>
-                            <span id="hero-rating"></span>
-                        </div>
-                        <span id="hero-year" class="font-semibold"></span>
-                        <span id="hero-runtime" class="text-gray-300"></span>
-                        <div id="hero-genres" class="flex gap-2"></div>
-                    </div>
-                    
-                    <!-- Overview -->
-                    <p id="hero-overview" class="text-base md:text-lg text-gray-200 line-clamp-2 max-w-2xl drop-shadow-lg"></p>
-                    
-                    <!-- AI Recommendation -->
-                    <div id="hero-explanation" class="hidden p-3 bg-gradient-to-r from-indigo-900/50 to-transparent rounded-lg border-l-4 border-indigo-500 backdrop-blur-sm max-w-2xl">
-                        <p class="text-xs md:text-sm text-gray-100">
-                            <span class="text-indigo-400 font-semibold inline-flex items-center mr-2">
-                                <svg class="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
-                                </svg>
-                                AI Recommends
-                            </span>
-                            <span id="explanation-text" class="text-gray-200"></span>
-                        </p>
-                    </div>
-                    
-                    <!-- Action Buttons -->
-                    <div class="flex gap-3 pt-1">
-                        <button onclick="watchMovie()" class="px-5 py-2.5 bg-white text-black hover:bg-gray-200 rounded font-bold text-sm md:text-base transition flex items-center shadow-xl">
-                            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
-                            </svg>
-                            Play
-                        </button>
-                        <button onclick="showMovieDetail()" class="px-5 py-2.5 bg-gray-600/80 hover:bg-gray-600 backdrop-blur-sm rounded font-semibold text-sm md:text-base transition flex items-center border border-gray-500/50">
-                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            More Info
-                        </button>
-                    </div>
+</section>
+
+<!-- Filter Bar -->
+<section class="relative z-10 bg-gray-950">
+    <div class="container mx-auto px-8 md:px-12 py-6">
+        <div class="flex flex-wrap items-center justify-between gap-4 bg-gray-900/80 backdrop-blur-sm p-6 rounded-xl border border-gray-800 shadow-lg">
+            <div class="flex items-center gap-4 flex-wrap">
+                <!-- Category Filter -->
+                <div class="flex items-center gap-2">
+                    <label class="text-gray-400 text-sm font-semibold">Browse:</label>
+                    <button onclick="window.location.href='/category/action'" class="bg-gray-800 hover:bg-indigo-600 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                        Action
+                    </button>
+                    <button onclick="window.location.href='/category/comedy'" class="bg-gray-800 hover:bg-indigo-600 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                        Comedy
+                    </button>
+                    <button onclick="window.location.href='/category/thriller'" class="bg-gray-800 hover:bg-indigo-600 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                        Thriller
+                    </button>
+                    <button onclick="window.location.href='/category/all'" class="bg-gray-800 hover:bg-indigo-600 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                        More →
+                    </button>
                 </div>
+                
+                <!-- Media Type Filter -->
+                <div class="flex items-center gap-2">
+                    <label class="text-gray-400 text-sm font-semibold">Type:</label>
+                    <select id="media-type-filter" class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="all">Movies & TV</option>
+                        <option value="movie">Movies Only</option>
+                        <option value="tv">TV Series Only</option>
+                    </select>
+                </div>
+                
+                <!-- Hide Compared Toggle -->
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="hide-compared" class="w-4 h-4 rounded bg-gray-800 border-gray-700 text-indigo-600 focus:ring-indigo-500" checked>
+                    <span class="text-gray-400 text-sm font-semibold">Hide Compared</span>
+                </label>
+            </div>
+            
+            <!-- Search Button -->
+            <div class="flex-1 max-w-md">
+                <button onclick="window.location.href='/search'" class="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-4 py-2 text-left text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                    <svg class="inline w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    Search with AI...
+                </button>
             </div>
         </div>
     </div>
@@ -79,62 +81,83 @@
 
 <!-- Content Sections -->
 <section class="relative z-10 bg-gradient-to-b from-gray-950 via-gray-950 to-black pb-20">
-    <div class="container mx-auto px-8 md:px-12 space-y-16 -mt-20">
+    <div class="container mx-auto px-8 md:px-12 space-y-12 pt-8">
         
-        <!-- Recommended For You -->
-        <div id="personalized-section" class="hidden">
+        <!-- Top Picks For You -->
+        <div id="top-picks-section" class="hidden">
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-2xl md:text-3xl font-bold">Recommended For You</h2>
-                <a href="/compare" class="text-gray-400 hover:text-white transition text-sm md:text-base">
-                    Refine Preferences →
-                </a>
+                <h2 class="text-2xl md:text-3xl font-bold">Top Picks For You</h2>
+                <div class="flex items-center gap-4">
+                    <a href="/compare" class="text-gray-400 hover:text-white transition text-sm">Refine →</a>
+                    <a href="/category/top-picks" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-semibold transition">
+                        View All
+                    </a>
+                </div>
             </div>
-            <div id="recommendations-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
-            <div class="text-center mt-6">
-                <button id="load-more-recommendations" onclick="loadMoreRecommendations()" class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition">
-                    Load More Recommendations
-                </button>
+            <div class="relative">
+                <div id="top-picks-scroll" class="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4" data-offset="0">
+                    <!-- Movies loaded here -->
+                </div>
             </div>
         </div>
         
-        <!-- Top Rated Movies -->
+        <!-- Action Shows -->
         <div>
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-2xl md:text-3xl font-bold">Top Rated on CineSense</h2>
+                <h2 class="text-2xl md:text-3xl font-bold">Action Shows</h2>
+                <a href="/category/action" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-semibold transition">
+                    View All
+                </a>
             </div>
-            <div id="top-rated-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
-            <div class="text-center mt-6">
-                <button id="load-more-top-rated" onclick="loadMoreTopRated()" class="px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition">
-                    Load More Top Rated
-                </button>
+            <div class="relative">
+                <div id="action-scroll" class="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4" data-offset="0">
+                    <!-- Movies loaded here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Thrillers -->
+        <div>
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl md:text-3xl font-bold">Thrillers</h2>
+                <a href="/category/thriller" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-semibold transition">
+                    View All
+                </a>
+            </div>
+            <div class="relative">
+                <div id="thriller-scroll" class="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4" data-offset="0">
+                    <!-- Movies loaded here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top Rated -->
+        <div>
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl md:text-3xl font-bold">Top Rated</h2>
+                <a href="/category/top-rated" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-semibold transition">
+                    View All
+                </a>
+            </div>
+            <div class="relative">
+                <div id="top-rated-scroll" class="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4" data-offset="0">
+                    <!-- Movies loaded here -->
+                </div>
             </div>
         </div>
         
         <!-- Trending Now -->
         <div>
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-2xl md:text-3xl font-bold flex items-center">
-                    Trending Now
-                </h2>
+                <h2 class="text-2xl md:text-3xl font-bold">Trending Now</h2>
+                <a href="/category/trending" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-semibold transition">
+                    View All
+                </a>
             </div>
-            <div id="trending-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
-            <div class="text-center mt-6">
-                <button id="load-more-trending" onclick="loadMoreTrending()" class="px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition">
-                    Load More Trending
-                </button>
-            </div>
-        </div>
-        
-        <!-- Popular This Week -->
-        <div>
-            <div class="flex items-center justify-between mb-6">
-                <h2 class="text-2xl md:text-3xl font-bold">Popular This Week</h2>
-            </div>
-            <div id="popular-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
-            <div class="text-center mt-6">
-                <button id="load-more-popular" onclick="loadMorePopular()" class="px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition">
-                    Load More Popular
-                </button>
+            <div class="relative">
+                <div id="trending-scroll" class="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4" data-offset="0">
+                    <!-- Movies loaded here -->
+                </div>
             </div>
         </div>
         
@@ -166,367 +189,462 @@
 
 {% block scripts %}
 <script>
-    let currentHeroMovie = null;
-    let recommendationsOffset = 20;
-    let topRatedOffset = 20;
-    let trendingOffset = 20;
-    let popularOffset = 20;
-    let isLoading = false;
+    // Carousel state
+    let carouselMovies = [];
+    let currentSlide = 0;
+    let carouselInterval;
+    
+    // Track all loaded movie IDs to prevent duplicates
+    const loadedMovieIds = new Set();
+    
+    // Track compared movies
+    const comparedMovieIds = new Set();
+    
+    // Current filter state
+    let currentFilters = {
+        category: 'all',
+        mediaType: 'all',
+        hideCompared: true
+    };
+    
+    // Horizontal scroll state - using different offsets and orders
+    const scrollSections = {
+        'top-picks': { offset: 0, limit: 30, loaded: 0, order: 'elo_score' },
+        'action': { offset: 30, limit: 30, loaded: 0, order: 'popularity' },
+        'thriller': { offset: 60, limit: 30, loaded: 0, order: 'popularity' },
+        'top-rated': { offset: 0, limit: 30, loaded: 0, order: 'tmdb_rating' },
+        'trending': { offset: 15, limit: 30, loaded: 0, order: 'elo_score' }
+    };
 
     document.addEventListener('DOMContentLoaded', async () => {
-        await Promise.all([
-            loadHero(),
-            loadRecommendations(),
-            loadTopRated(),
-            loadTrending(),
-            loadPopular()
-        ]);
-        
-        // Initialize infinite scroll
-        initializeInfiniteScroll();
-        
-        // Initialize lazy loading manager if available
-        if (typeof LazyLoadingManager !== 'undefined') {
-            await LazyLoadingManager.initialize();
-        }
+        await loadComparedMovies();
+        await loadCarousel();
+        await loadAllSections();
+        initializeHorizontalScroll();
+        initializeFilters();
+        initializeAISearch();
+        startCarousel();
     });
     
-    function initializeInfiniteScroll() {
-        let scrollTimeout;
-        window.addEventListener('scroll', () => {
-            if (scrollTimeout) clearTimeout(scrollTimeout);
+    // Load compared movies for filtering
+    async function loadComparedMovies() {
+        try {
+            const response = await fetch('/api/user/compared-movies');
+            if (response.ok) {
+                const data = await response.json();
+                data.movies.forEach(movie => comparedMovieIds.add(movie.movie_id));
+            }
+        } catch (error) {
+            console.log('Not authenticated or error loading compared movies');
+        }
+    }
+    
+    // Initialize filter controls
+    function initializeFilters() {
+        const mediaTypeFilter = document.getElementById('media-type-filter');
+        const hideComparedCheckbox = document.getElementById('hide-compared');
+        
+        // Only initialize if elements exist
+        if (mediaTypeFilter) {
+            mediaTypeFilter.addEventListener('change', async (e) => {
+                currentFilters.mediaType = e.target.value;
+                await reloadAllSections();
+            });
+        }
+        
+        if (hideComparedCheckbox) {
+            hideComparedCheckbox.addEventListener('change', async (e) => {
+                currentFilters.hideCompared = e.target.checked;
+                await reloadAllSections();
+            });
+        }
+    }
+    
+    // Initialize AI-powered search
+    function initializeAISearch() {
+        const searchInput = document.getElementById('ai-search');
+        const searchIndicator = document.getElementById('ai-search-indicator');
+        
+        let searchTimeout;
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            const query = e.target.value.trim();
             
-            scrollTimeout = setTimeout(() => {
-                const scrollPosition = window.innerHeight + window.scrollY;
-                const documentHeight = document.documentElement.scrollHeight;
-                
-                // Load more when 80% down the page
-                if (scrollPosition >= documentHeight * 0.8 && !isLoading) {
-                    loadMoreContent();
+            if (query.length < 3) return;
+            
+            searchIndicator.classList.remove('hidden');
+            
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch('/api/search/ai', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        displaySearchResults(data.results);
+                    }
+                } catch (error) {
+                    console.error('AI search error:', error);
+                } finally {
+                    searchIndicator.classList.add('hidden');
                 }
-            }, 100);
+            }, 500);
         });
     }
     
-    async function loadMoreContent() {
-        // Load more for all sections automatically
-        const promises = [];
+    // Display AI search results
+    function displaySearchResults(results) {
+        // Clear all sections and display search results
+        Object.keys(scrollSections).forEach(section => {
+            const container = document.getElementById(`${section}-scroll`);
+            if (container) container.innerHTML = '';
+        });
         
-        if (document.getElementById('personalized-section').classList.contains('hidden') === false) {
-            promises.push(loadMoreRecommendations());
-        }
-        
-        promises.push(loadMoreTopRated());
-        promises.push(loadMoreTrending());
-        promises.push(loadMorePopular());
-        
-        await Promise.all(promises);
-    }
-    
-    async function loadMoreRecommendations() {
-        if (isLoading) return;
-        isLoading = true;
-        
-        const button = document.getElementById('load-more-recommendations');
-        const indicator = document.getElementById('infinite-loading-indicator');
-        button.textContent = 'Loading...';
-        button.disabled = true;
-        indicator.classList.remove('hidden');
-        
-        try {
-            const response = await fetch(`/api/recommendations/lazy?limit=20&offset=${recommendationsOffset}`);
-            const data = await response.json();
-            
-            if (data.movies && data.movies.length > 0) {
-                const container = document.getElementById('recommendations-container');
-                container.innerHTML += data.movies.map(createStreamingCard).join('');
-                recommendationsOffset += data.movies.length;
-                
-                console.log(`✓ Loaded ${data.movies.length} more recommendations via lazy loading (total: ${recommendationsOffset})`);
-            } else {
-                button.textContent = 'No More Movies';
-                button.disabled = true;
-                return;
-            }
-        } catch (error) {
-            console.error('Error loading more recommendations:', error);
-        } finally {
-            button.textContent = 'Load More Recommendations';
-            button.disabled = false;
-            indicator.classList.add('hidden');
-            isLoading = false;
+        if (results && results.length > 0) {
+            const topPicksContainer = document.getElementById('top-picks-scroll');
+            results.forEach(movie => {
+                if (!shouldFilterMovie(movie)) {
+                    topPicksContainer.innerHTML += createHorizontalCard(movie);
+                }
+            });
+            document.getElementById('top-picks-section').classList.remove('hidden');
         }
     }
     
-    async function loadMoreTopRated() {
-        console.log('loadMoreTopRated called! Current offset:', topRatedOffset);
+    // Reload all sections with current filters
+    async function reloadAllSections() {
+        // Clear all sections
+        Object.keys(scrollSections).forEach(section => {
+            const container = document.getElementById(`${section}-scroll`);
+            if (container) container.innerHTML = '';
+            scrollSections[section].offset = section === 'top-picks' ? 0 : 
+                                            section === 'action' ? 30 : 
+                                            section === 'thriller' ? 60 : 
+                                            section === 'trending' ? 15 : 0;
+            scrollSections[section].loaded = 0;
+        });
         
-        if (isLoading) {
-            console.log('Already loading, skipping...');
-            return;
+        // Clear loaded movie IDs
+        loadedMovieIds.clear();
+        
+        // Reload carousel with filters
+        carouselMovies.forEach(movie => loadedMovieIds.add(movie.movie_id));
+        
+        // Reload all sections
+        await loadAllSections();
+    }
+    
+    // Check if movie should be filtered
+    function shouldFilterMovie(movie) {
+        // Check if compared and should hide
+        if (currentFilters.hideCompared && comparedMovieIds.has(movie.movie_id)) {
+            return true;
         }
-        isLoading = true;
         
-        const button = document.getElementById('load-more-top-rated');
-        const indicator = document.getElementById('infinite-loading-indicator');
-        
-        if (!button) {
-            console.error('Button not found!');
-            isLoading = false;
-            return;
+        // Check media type
+        if (currentFilters.mediaType !== 'all') {
+            const mediaType = movie.media_type || 'movie';
+            if (mediaType !== currentFilters.mediaType) {
+                return true;
+            }
         }
         
-        button.textContent = 'Loading...';
-        button.disabled = true;
-        indicator.classList.remove('hidden');
+        // Check category
+        if (currentFilters.category !== 'all') {
+            const genres = (movie.genres || '').toLowerCase();
+            const category = currentFilters.category.toLowerCase();
+            if (!genres.includes(category)) {
+                return true;
+            }
+        }
         
+        return false;
+    }
+    
+    // =================== CAROUSEL ===================
+    async function loadCarousel() {
         try {
-            const url = `/api/movie/top-rated?order_by=tmdb_rating&limit=20&offset=${topRatedOffset}`;
-            console.log('Fetching:', url);
-            
-            const response = await fetch(url);
-            console.log('Response status:', response.status);
-            
+            const response = await fetch('/api/movie/top-rated?order_by=tmdb_rating&limit=5&offset=5');
             const data = await response.json();
-            console.log('Data received:', data);
             
             if (data.movies && data.movies.length > 0) {
-                const container = document.getElementById('top-rated-container');
-                const newCards = data.movies.map(createStreamingCard).join('');
-                container.innerHTML += newCards;
-                topRatedOffset += data.movies.length;
-                
-                console.log(`✓ Loaded ${data.movies.length} more top rated (total offset: ${topRatedOffset})`);
-            } else {
-                console.log('No more movies available');
-                button.textContent = 'No More Movies';
-                button.disabled = true;
-                return;
+                carouselMovies = data.movies;
+                // Track carousel movie IDs
+                carouselMovies.forEach(movie => loadedMovieIds.add(movie.movie_id));
+                renderCarousel();
             }
         } catch (error) {
-            console.error('Error loading more top rated:', error);
-            alert('Error loading more movies: ' + error.message);
-        } finally {
-            button.textContent = 'Load More Top Rated';
-            button.disabled = false;
-            indicator.classList.add('hidden');
-            isLoading = false;
+            console.error('Error loading carousel:', error);
         }
     }
     
-    async function loadMoreTrending() {
-        if (isLoading) return;
-        isLoading = true;
+    function renderCarousel() {
+        const track = document.getElementById('carousel-track');
+        const dotsContainer = document.getElementById('carousel-dots');
         
-        const button = document.getElementById('load-more-trending');
-        const indicator = document.getElementById('infinite-loading-indicator');
-        button.textContent = 'Loading...';
-        button.disabled = true;
-        indicator.classList.remove('hidden');
-        
-        try {
-            const response = await fetch(`/api/movie/top-rated?order_by=elo_score&limit=20&offset=${trendingOffset}`);
-            const data = await response.json();
+        track.innerHTML = carouselMovies.map((movie, index) => {
+            const backdropUrl = movie.backdrop_path 
+                ? `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}`
+                : `https://image.tmdb.org/t/p/w780${movie.poster_path}`;
             
-            if (data.movies && data.movies.length > 0) {
-                const container = document.getElementById('trending-container');
-                container.innerHTML += data.movies.map(createStreamingCard).join('');
-                trendingOffset += data.movies.length;
-                
-                console.log(`✓ Loaded ${data.movies.length} more trending (total: ${trendingOffset})`);
-            } else {
-                button.textContent = 'No More Movies';
-                button.disabled = true;
-                return;
-            }
-        } catch (error) {
-            console.error('Error loading more trending:', error);
-        } finally {
-            button.textContent = 'Load More Trending';
-            button.disabled = false;
-            indicator.classList.add('hidden');
-            isLoading = false;
-        }
-    }
-    
-    async function loadMorePopular() {
-        if (isLoading) return;
-        isLoading = true;
-        
-        const button = document.getElementById('load-more-popular');
-        const indicator = document.getElementById('infinite-loading-indicator');
-        button.textContent = 'Loading...';
-        button.disabled = true;
-        indicator.classList.remove('hidden');
-        
-        try {
-            const response = await fetch(`/api/movie/top-rated?order_by=popularity&limit=20&offset=${popularOffset}`);
-            const data = await response.json();
-            
-            if (data.movies && data.movies.length > 0) {
-                const container = document.getElementById('popular-container');
-                container.innerHTML += data.movies.map(createStreamingCard).join('');
-                popularOffset += data.movies.length;
-                
-                console.log(`✓ Loaded ${data.movies.length} more popular (total: ${popularOffset})`);
-            } else {
-                button.textContent = 'No More Movies';
-                button.disabled = true;
-                return;
-            }
-        } catch (error) {
-            console.error('Error loading more popular:', error);
-        } finally {
-            button.textContent = 'Load More Popular';
-            button.disabled = false;
-            indicator.classList.add('hidden');
-            isLoading = false;
-        }
-    }
-
-    async function loadHero() {
-        try {
-            const response = await fetch('/api/featured');
-            const data = await response.json();
-            
-            if (data.movie) {
-                currentHeroMovie = data.movie;
-                displayHero(data.movie, data.explanation);
-            }
-        } catch (error) {
-            console.error('Error loading hero:', error);
-        }
-    }
-
-    function displayHero(movie, explanation) {
-        const backdropUrl = movie.backdrop_path 
-            ? `https://image.tmdb.org/t/p/original${movie.backdrop_path}`
-            : `https://image.tmdb.org/t/p/w1280${movie.poster_path}`;
-        
-        document.getElementById('hero-backdrop').style.backgroundImage = `url('${backdropUrl}')`;
-        document.getElementById('hero-title').textContent = movie.title;
-        document.getElementById('hero-rating').textContent = movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A';
-        document.getElementById('hero-year').textContent = movie.release_year || '';
-        document.getElementById('hero-runtime').textContent = movie.runtime ? `${movie.runtime} min` : '';
-        document.getElementById('hero-overview').textContent = movie.overview || '';
-        
-        // Genres
-        if (movie.genres) {
-            const genres = movie.genres.split(',').slice(0, 3);
-            document.getElementById('hero-genres').innerHTML = genres.map(g => 
-                `<span class="px-3 py-1 bg-white/20 backdrop-blur-sm rounded text-sm font-semibold">${g.trim()}</span>`
-            ).join('');
-        }
-        
-        // AI Explanation
-        if (explanation) {
-            document.getElementById('explanation-text').textContent = explanation;
-            document.getElementById('hero-explanation').classList.remove('hidden');
-        }
-        
-        document.getElementById('hero-loading').classList.add('hidden');
-        document.getElementById('hero-content').classList.remove('hidden');
-    }
-
-    async function loadRecommendations() {
-        try {
-            const response = await fetch('/api/recommendations?limit=20');
-            const data = await response.json();
-            
-            if (data.personalized && data.movies && data.movies.length > 0) {
-                document.getElementById('personalized-section').classList.remove('hidden');
-                document.getElementById('recommendations-container').innerHTML = 
-                    data.movies.map(createStreamingCard).join('');
-            }
-        } catch (error) {
-            console.error('Error loading recommendations:', error);
-        }
-    }
-
-    async function loadTopRated() {
-        try {
-            const response = await fetch('/api/movie/top-rated?order_by=tmdb_rating&limit=20');
-            const data = await response.json();
-            
-            if (data.movies) {
-                document.getElementById('top-rated-container').innerHTML = 
-                    data.movies.map(createStreamingCard).join('');
-            }
-        } catch (error) {
-            console.error('Error loading top rated:', error);
-        }
-    }
-
-    async function loadTrending() {
-        try {
-            const response = await fetch('/api/movie/top-rated?order_by=elo_score&limit=20');
-            const data = await response.json();
-            
-            if (data.movies) {
-                document.getElementById('trending-container').innerHTML = 
-                    data.movies.map(createStreamingCard).join('');
-            }
-        } catch (error) {
-            console.error('Error loading trending:', error);
-        }
-    }
-
-    async function loadPopular() {
-        try {
-            const response = await fetch('/api/movie/top-rated?order_by=popularity&limit=20');
-            const data = await response.json();
-            
-            if (data.movies) {
-                document.getElementById('popular-container').innerHTML = 
-                    data.movies.map(createStreamingCard).join('');
-            }
-        } catch (error) {
-            console.error('Error loading popular:', error);
-        }
-    }
-
-    function createStreamingCard(movie) {
-        const posterUrl = movie.poster_path 
-            ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-            : 'https://via.placeholder.com/500x750?text=No+Poster';
-        const rating = movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A';
-        
-        return `
-            <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
-                <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl group-hover:z-10">
-                    <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy">
-                    
-                    <!-- Hover Overlay -->
-                    <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div class="absolute bottom-0 left-0 right-0 p-4">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="flex items-center text-yellow-400 font-bold">
-                                    <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+            return `
+                <div class="min-w-full h-full relative">
+                    <img src="${backdropUrl}" class="absolute inset-0 w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/1280x720/1a1a1a/666666?text=${encodeURIComponent(movie.title)}';" loading="lazy" />
+                    <div class="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-transparent"></div>
+                    <div class="relative h-full flex items-center">
+                        <div class="container mx-auto px-8 md:px-12 max-w-2xl">
+                            <h1 class="text-5xl md:text-7xl font-black mb-4 drop-shadow-lg">${movie.title}</h1>
+                            <div class="flex items-center gap-4 mb-6">
+                                <span class="flex items-center text-yellow-400 font-bold text-lg">
+                                    <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
                                     </svg>
-                                    ${rating}
+                                    ${movie.tmdb_rating || 'N/A'}
                                 </span>
-                                <span class="text-sm text-gray-300">${movie.release_year || ''}</span>
+                                <span class="text-gray-300">${movie.release_year || ''}</span>
                             </div>
-                            <h3 class="font-bold text-sm line-clamp-2">${movie.title}</h3>
+                            <p class="text-lg text-gray-300 mb-8 line-clamp-3">${movie.overview || ''}</p>
+                            <div class="flex gap-4">
+                                <button onclick="window.location.href='/movie/${movie.movie_id}'" class="px-8 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-bold text-lg transition">
+                                    More Info
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        // Render dots
+        dotsContainer.innerHTML = carouselMovies.map((_, index) => `
+            <button class="w-3 h-3 rounded-full transition ${index === 0 ? 'bg-white' : 'bg-white/40'}" onclick="goToSlide(${index})"></button>
+        `).join('');
+        
+        // Navigation
+        document.getElementById('prev-slide').onclick = () => changeSlide(-1);
+        document.getElementById('next-slide').onclick = () => changeSlide(1);
+    }
+    
+    function changeSlide(direction) {
+        currentSlide = (currentSlide + direction + carouselMovies.length) % carouselMovies.length;
+        updateCarousel();
+    }
+    
+    function goToSlide(index) {
+        currentSlide = index;
+        updateCarousel();
+    }
+    
+    function updateCarousel() {
+        const track = document.getElementById('carousel-track');
+        track.style.transform = `translateX(-${currentSlide * 100}%)`;
+        
+        // Update dots
+        document.querySelectorAll('#carousel-dots button').forEach((dot, index) => {
+            dot.className = `w-3 h-3 rounded-full transition ${index === currentSlide ? 'bg-white' : 'bg-white/40'}`;
+        });
+    }
+    
+    function startCarousel() {
+        carouselInterval = setInterval(() => {
+            changeSlide(1);
+        }, 5000);
+    }
+    
+    // =================== HORIZONTAL SCROLL SECTIONS ===================
+    async function loadAllSections() {
+        await Promise.all([
+            loadSection('top-picks', buildSectionUrl('top-picks', 15)),
+            loadSection('action', buildSectionUrl('action', 10)),
+            loadSection('thriller', buildSectionUrl('thriller', 10)),
+            loadSection('top-rated', buildSectionUrl('top-rated', 10)),
+            loadSection('trending', buildSectionUrl('trending', 10))
+        ]);
+    }
+    
+    function buildSectionUrl(sectionName, limit) {
+        const params = new URLSearchParams();
+        params.append('limit', limit.toString());
+        params.append('offset', scrollSections[sectionName].offset.toString());
+        
+        // Add media type filter
+        if (currentFilters.mediaType !== 'all') {
+            params.append('media_type', currentFilters.mediaType);
+        }
+        
+        // Determine base URL and parameters
+        if (sectionName === 'top-picks') {
+            return `/api/movie/top-rated?order_by=elo_score&${params.toString()}`;
+        } else if (sectionName === 'action') {
+            return `/api/movie/top-rated?order_by=popularity&${params.toString()}`;
+        } else if (sectionName === 'thriller') {
+            return `/api/movie/top-rated?order_by=popularity&${params.toString()}`;
+        } else if (sectionName === 'top-rated') {
+            return `/api/movie/top-rated?order_by=tmdb_rating&${params.toString()}`;
+        } else if (sectionName === 'trending') {
+            return `/api/movie/top-rated?order_by=elo_score&${params.toString()}`;
+        }
+        
+        return `/api/movie/top-rated?${params.toString()}`;
+    }
+    
+    async function loadSection(sectionName, url) {
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            let movies = data.movies || [];
+            
+            // Filter out duplicates and apply filters
+            movies = movies.filter(movie => {
+                if (loadedMovieIds.has(movie.movie_id)) {
+                    return false;
+                }
+                if (shouldFilterMovie(movie)) {
+                    return false;
+                }
+                loadedMovieIds.add(movie.movie_id);
+                return true;
+            });
+            
+            const container = document.getElementById(`${sectionName}-scroll`);
+            if (!container) return;
+            
+            container.innerHTML = movies.map(movie => createHorizontalCard(movie)).join('');
+            
+            // Update tracking
+            const section = scrollSections[sectionName];
+            section.loaded = movies.length;
+            section.offset += movies.length;
+            
+            // Show section if it's top-picks (personalized)
+            if (sectionName === 'top-picks' && movies.length > 0) {
+                document.getElementById('top-picks-section').classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error(`Error loading ${sectionName}:`, error);
+        }
+    }
+    
+    function createHorizontalCard(movie) {
+        const posterUrl = movie.poster_path 
+            ? `https://image.tmdb.org/t/p/w342${movie.poster_path}`
+            : 'https://via.placeholder.com/342x513/1a1a1a/666666?text=No+Poster';
+        
+        return `
+            <div class="flex-shrink-0 w-48 group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
+                <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl">
+                    <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(movie.title)}';" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div class="absolute bottom-0 left-0 right-0 p-3">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="flex items-center text-yellow-400 font-bold text-sm">
+                                    <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                                    </svg>
+                                    ${movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A'}
+                                </span>
+                                <span class="text-xs text-gray-300">${movie.release_year || ''}</span>
+                            </div>
+                            <h3 class="font-bold text-xs line-clamp-2">${movie.title}</h3>
                         </div>
                     </div>
                 </div>
             </div>
         `;
     }
-
-    function watchMovie() {
-        if (currentHeroMovie) {
-            const searchQuery = encodeURIComponent(currentHeroMovie.title);
-            window.open(`https://www.justwatch.com/us/search?q=${searchQuery}`, '_blank');
+    
+    function initializeHorizontalScroll() {
+        Object.keys(scrollSections).forEach(sectionName => {
+            const container = document.getElementById(`${sectionName}-scroll`);
+            if (!container) return;
+            
+            container.addEventListener('scroll', debounce(async () => {
+                const scrollLeft = container.scrollLeft;
+                const scrollWidth = container.scrollWidth;
+                const clientWidth = container.clientWidth;
+                
+                // Load more when 80% scrolled
+                if (scrollLeft + clientWidth >= scrollWidth * 0.8) {
+                    await loadMoreInSection(sectionName);
+                }
+            }, 200));
+        });
+    }
+    
+    async function loadMoreInSection(sectionName) {
+        const section = scrollSections[sectionName];
+        
+        // Check if limit reached
+        if (section.loaded >= section.limit) {
+            document.getElementById(`${sectionName}-view-all`).classList.remove('hidden');
+            return;
+        }
+        
+        let url;
+        if (sectionName === 'top-picks') {
+            url = `/api/recommendations?limit=10&offset=${section.offset}`;
+        } else {
+            // All other sections use top-rated endpoint with different orderings
+            url = `/api/movie/top-rated?order_by=${section.order}&limit=10&offset=${section.offset}`;
+        }
+        
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            let movies = data.movies || [];
+            
+            // Filter out duplicates
+            movies = movies.filter(movie => {
+                if (loadedMovieIds.has(movie.movie_id)) {
+                    return false;
+                }
+                loadedMovieIds.add(movie.movie_id);
+                return true;
+            });
+            
+            if (movies.length > 0) {
+                const container = document.getElementById(`${sectionName}-scroll`);
+                movies.forEach(movie => {
+                    container.innerHTML += createHorizontalCard(movie);
+                });
+                
+                section.loaded += movies.length;
+                section.offset += movies.length;
+            }
+        } catch (error) {
+            console.error(`Error loading more for ${sectionName}:`, error);
         }
     }
-
-    function showMovieDetail() {
-        if (currentHeroMovie) {
-            window.location.href = `/movie/${currentHeroMovie.movie_id}`;
-        }
+    
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+    
+    // Initialize lazy loading manager if available
+    if (typeof LazyLoadingManager !== 'undefined') {
+        LazyLoadingManager.initialize();
     }
 </script>
+
+<!-- Add scrollbar hide CSS -->
+<style>
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+    }
+    .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+</style>
 {% endblock %}

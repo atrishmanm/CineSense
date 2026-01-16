@@ -49,6 +49,24 @@ class TMDBFetcher:
         params = {'page': page, 'language': 'en-US'}
         return self._make_request(endpoint, params)
     
+    def get_popular_tv_series(self, page=1):
+        """Fetch popular TV series"""
+        endpoint = "tv/popular"
+        params = {'page': page, 'language': 'en-US'}
+        return self._make_request(endpoint, params)
+    
+    def get_top_rated_tv_series(self, page=1):
+        """Fetch top rated TV series"""
+        endpoint = "tv/top_rated"
+        params = {'page': page, 'language': 'en-US'}
+        return self._make_request(endpoint, params)
+    
+    def get_tv_details(self, tv_id):
+        """Get detailed information about a TV series"""
+        endpoint = f"tv/{tv_id}"
+        params = {'language': 'en-US', 'append_to_response': 'credits,videos'}
+        return self._make_request(endpoint, params)
+    
     def get_now_playing(self, page=1):
         """Fetch now playing movies"""
         endpoint = "movie/now_playing"

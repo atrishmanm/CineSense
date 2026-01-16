@@ -159,15 +159,22 @@ class DatabaseManager:
             cursor.execute(query, (min_popularity, limit))
             return cursor.fetchall()
     
-    def get_top_movies(self, limit=20, order_by='elo_score', offset=0):
-        """Get top rated movies with pagination support"""
+    def get_top_movies(self, limit=20, order_by='elo_score', offset=0, media_type='all'):
+        """Get top rated movies with pagination support and media type filter"""
         valid_orders = ['elo_score', 'tmdb_rating', 'popularity']
         if order_by not in valid_orders:
             order_by = 'elo_score'
         
+        # Build media type filter
+        media_filter = ""
+        if media_type == 'movie':
+            media_filter = "AND (media_type = 'movie' OR media_type IS NULL)"
+        elif media_type == 'tv':
+            media_filter = "AND media_type = 'tv'"
+        
         query = f"""
             SELECT * FROM movie_details 
-            WHERE tmdb_rating IS NOT NULL
+            WHERE tmdb_rating IS NOT NULL {media_filter}
             ORDER BY {order_by} DESC
             LIMIT %s OFFSET %s
         """
@@ -184,6 +191,33 @@ class DatabaseManager:
         """
         with self.get_cursor() as cursor:
             cursor.execute(query, (search_term, limit))
+            return cursor.fetchall()
+    
+    def get_movies_by_genre_and_type(self, genre_name=None, media_type='all', limit=20, offset=0):
+        """Get movies/TV series by genre and media type"""
+        conditions = ["tmdb_rating IS NOT NULL"]
+        params = []
+        
+        if genre_name and genre_name != 'all':
+            conditions.append("FIND_IN_SET(%s, genres) > 0")
+            params.append(genre_name)
+        
+        if media_type == 'movie':
+            conditions.append("(media_type = 'movie' OR media_type IS NULL)")
+        elif media_type == 'tv':
+            conditions.append("media_type = 'tv'")
+        
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT * FROM movie_details
+            WHERE {where_clause}
+            ORDER BY tmdb_rating DESC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([limit, offset])
+        
+        with self.get_cursor() as cursor:
+            cursor.execute(query, tuple(params))
             return cursor.fetchall()
     
     # ========================================================================

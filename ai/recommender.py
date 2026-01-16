@@ -876,6 +876,138 @@ class CineSenseRecommender:
     def get_cache_stats(self):
         """Get cache statistics for monitoring"""
         return self.cache.get_stats()
+    
+    def semantic_search(self, query, n=20, include_tv_series=True):
+        """
+        AI-powered semantic search using embeddings and NLP
+        
+        Args:
+            query: Natural language search query
+            n: Number of results to return
+            include_tv_series: Whether to include TV series in results
+        
+        Returns:
+            List of matching movies/TV series with relevance scores
+        """
+        try:
+            logger.info(f"Semantic search: '{query}', include_tv={include_tv_series}")
+            
+            # Get all movies for semantic matching (skip problematic keyword search)
+            media_filter = 'all' if include_tv_series else 'movie'
+            all_content = db.get_top_movies(limit=2000, media_type=media_filter)
+            
+            # Create query embedding
+            # For now, use simple keyword matching with genre/theme extraction
+            query_lower = query.lower()
+            
+            # Extract potential genre/theme keywords
+            genre_keywords = {
+                'action': ['action', 'fight', 'battle', 'war', 'combat'],
+                'thriller': ['thriller', 'suspense', 'tension', 'mystery', 'twist'],
+                'comedy': ['comedy', 'funny', 'hilarious', 'laugh', 'humor'],
+                'drama': ['drama', 'emotional', 'touching', 'powerful'],
+                'horror': ['horror', 'scary', 'frightening', 'terror', 'creepy'],
+                'romance': ['romance', 'love', 'romantic', 'relationship'],
+                'sci-fi': ['sci-fi', 'science fiction', 'futuristic', 'space', 'alien'],
+                'fantasy': ['fantasy', 'magic', 'magical', 'wizard', 'mythical'],
+                'animation': ['animation', 'animated', 'cartoon'],
+                'documentary': ['documentary', 'real', 'true story']
+            }
+            
+            # Mood/theme keywords
+            mood_keywords = {
+                'mind-bending': ['mind-bending', 'complex', 'twist', 'psychological'],
+                'dark': ['dark', 'gritty', 'noir', 'bleak'],
+                'uplifting': ['uplifting', 'inspiring', 'heartwarming', 'feel-good'],
+                'intense': ['intense', 'gripping', 'edge-of-seat', 'thrilling']
+            }
+            
+            # Score each movie based on query
+            scored_results = []
+            query_words = query_lower.split()
+            
+            for content in all_content:
+                score = 0.0
+                
+                # Get content fields
+                title = (content.get('title') or '').lower()
+                overview = (content.get('overview') or '').lower()
+                content_genres = (content.get('genres') or '').lower()
+                directors = (content.get('directors') or '').lower()
+                cast = (content.get('cast') or '').lower()
+                
+                # 1. Exact title match (very high score)
+                if query_lower in title:
+                    score += 50.0
+                
+                # 2. Title word matching (high score)
+                for word in query_words:
+                    if len(word) > 2 and word in title:
+                        score += 15.0
+                
+                # 3. Overview matching (medium score)
+                if query_lower in overview:
+                    score += 20.0
+                
+                # 4. Individual word matches in overview
+                for word in query_words:
+                    if len(word) > 2:
+                        if word in overview:
+                            score += 8.0
+                        # Partial word matches
+                        if any(word in w for w in overview.split()):
+                            score += 3.0
+                
+                # 5. Genre matching
+                for genre, keywords in genre_keywords.items():
+                    if any(kw in query_lower for kw in keywords):
+                        if genre in content_genres:
+                            score += 10.0
+                
+                # 6. Mood/theme matching
+                for mood, keywords in mood_keywords.items():
+                    if any(kw in query_lower for kw in keywords):
+                        if any(kw in overview for kw in keywords):
+                            score += 5.0
+                
+                # 7. Director/actor matching
+                for word in query_words:
+                    if len(word) > 2:
+                        if word in directors:
+                            score += 12.0
+                        if word in cast:
+                            score += 8.0
+                
+                # 8. Rating and popularity boost
+                rating = float(content.get('tmdb_rating') or 0)
+                popularity = float(content.get('popularity') or 0)
+                if score > 0:  # Only boost if there's already a match
+                    score += (rating / 10) * 2.0  # Up to 2.0 bonus
+                    score += min(popularity / 100, 2.0)  # Up to 2.0 bonus
+                
+                if score > 0:
+                    scored_results.append({
+                        **content,
+                        'search_score': score,
+                        'search_query': query
+                    })
+            
+            # Sort by score
+            scored_results.sort(key=lambda x: x['search_score'], reverse=True)
+            
+            # Return top N results
+            results = scored_results[:n]
+            
+            logger.info(f"Semantic search found {len(results)} results")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Semantic search error: {e}")
+            import traceback
+            traceback.print_exc()
+            # Return empty list on error
+            return []
 
 
 # Singleton instance

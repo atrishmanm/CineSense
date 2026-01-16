@@ -88,6 +88,24 @@ def create_app():
         """Search page"""
         return render_template('search.html')
     
+    @app.route('/category/<category_name>')
+    def category_page(category_name):
+        """Category detail page"""
+        # Map category names to titles and ordering
+        category_config = {
+            'top-picks': {'title': 'Top Picks For You', 'order': 'elo_score'},
+            'action': {'title': 'Action Movies', 'order': 'popularity'},
+            'thriller': {'title': 'Thrillers', 'order': 'popularity'},
+            'top-rated': {'title': 'Top Rated', 'order': 'tmdb_rating'},
+            'trending': {'title': 'Trending Now', 'order': 'elo_score'}
+        }
+        
+        config = category_config.get(category_name, {'title': 'Movies', 'order': 'popularity'})
+        return render_template('category.html', 
+                             category_name=category_name,
+                             category_title=config['title'],
+                             order_by=config['order'])
+    
     @app.route('/monitor')
     def cache_monitor():
         """Cache monitoring dashboard"""
