@@ -45,6 +45,13 @@ def create_app():
     # Register blueprints
     app.register_blueprint(api)
     
+    # Start content pipeline for continuous content ingestion
+    from ai.content_pipeline import start_content_pipeline
+    import threading
+    pipeline_thread = threading.Thread(target=start_content_pipeline, daemon=True)
+    pipeline_thread.start()
+    logger.info("✅ Hybrid content ingestion pipeline started")
+    
     # ==========================================================================
     # WEB ROUTES (Frontend)
     # ==========================================================================

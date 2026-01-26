@@ -2,26 +2,30 @@
 
 An intelligent movie recommendation system that learns your taste through simple comparisons and delivers personalized suggestions using advanced AI intelligence.
 
-## New: Lazy Loading Architecture Integrated
-
-CineSense now includes production-ready lazy loading with:
-- 77x memory reduction (54MB to 700KB)
-- Access to 1M+ movies (vs 10K before)
-- Real-time cache monitoring dashboard
-- Complete database migration support
-- Infinite content streaming from TMDB API
-
 ## Key Features
 
+### Core Features
 - **Smart AI Recommendations**: Learns your preferences without tedious ratings
 - **Pairwise Comparison**: Just pick which movie you prefer - the AI does the rest
 - **Explainable AI**: Every recommendation comes with natural language explanations
 - **Premium UI**: Modern streaming platform design with smooth interactions
 - **Multi-Layer Intelligence**: Combines collaborative filtering, content analysis, and reinforcement learning
 - **Real-Time Learning**: System adapts instantly as you make choices
-- **Advanced AI Features**: Latent representations, probabilistic decisions, temporal memory, and NLG
-- **Infinite Content**: Lazy loading from TMDB API - millions of movies, constant memory usage
-- **Production-Ready**: Memory-efficient architecture with candidate generation and sliding window cache
+
+### Advanced Features
+- **Lazy Loading Architecture**: 77x memory reduction (54MB to 700KB)
+- **Infinite Content**: Access to 1M+ movies via TMDB API streaming
+- **Hybrid Content Pipeline**: Automated content ingestion (daily/weekly/on-demand)
+- **Smart Search**: AI-powered semantic search with TMDB fallback
+- **Story-Based Search**: Search by plot, themes, or keywords
+- **Real-Time Cache Monitoring**: Dashboard for system performance
+- **Production-Ready**: Memory-efficient with candidate generation
+
+### Recent Updates
+- **Hybrid Search System**: Always fetches latest content from TMDB
+- **Automated Pipeline**: Daily updates, weekly refreshes, on-demand fetching
+- **Better Relevance**: Smart ranking prioritizes exact title matches
+- **Multi-Page Fetch**: Retrieves up to 60 movies per search query
 
 ---
 
@@ -337,6 +341,62 @@ Total: ~700KB (77x reduction)
 
 **log_cache_stats(...)**
 - Log cache performance metrics
+
+---
+
+## Database Design
+
+### Entity-Relationship Model
+
+**Core Entities:**
+- USERS - User accounts and authentication
+- MOVIES - Movie catalog with TMDB integration
+- GENRES - Normalized genre classification
+- DIRECTORS - Director information
+- ACTORS - Cast information
+- USER_INTERACTIONS - Pairwise comparison history
+- USER_EMBEDDINGS - User preference vectors
+- MOVIE_EMBEDDINGS - Movie feature vectors
+- MOVIE_GENRES - Movie-Genre relationships (junction table)
+- MOVIE_DIRECTORS - Movie-Director relationships (junction table)
+- MOVIE_ACTORS - Movie-Actor relationships (junction table)
+
+**Normalization:** 3NF (Third Normal Form)
+**Storage Engine:** InnoDB (ACID-compliant)
+**Character Set:** UTF-8MB4
+
+### Where User Data is Stored
+
+**1. USERS Table** - Core account information
+- username (unique identifier for login)
+- email (unique email address)
+- password_hash (encrypted with bcrypt via werkzeug.security)
+- created_at (account creation timestamp)
+- last_active (last login/activity)
+- interaction_count (total movie comparisons)
+
+Security: Passwords hashed with bcrypt, never stored in plain text, uses salt for additional protection.
+
+**2. USER_INTERACTIONS Table** - Movie preferences and likes
+- movie_1_id, movie_2_id (movies being compared)
+- chosen_movie_id (movie user preferred - "likes")
+- rejected_movie_id (movie user didn't prefer - "dislikes")
+- timestamp (when choice was made)
+- session_id (groups choices by session)
+
+This table records every pairwise comparison and trains the AI to understand user preferences.
+
+**3. USER_EMBEDDINGS Table** - AI preference vectors
+- feature_index (dimension in preference space)
+- feature_value (numerical preference value)
+- last_updated (when preferences were updated)
+
+Stores high-dimensional vectors representing user taste patterns learned from interactions.
+
+**Database Configuration:**
+- Development: localhost MySQL 8.0+
+- Connection details in config.py and .env file
+- DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT
 
 ---
 

@@ -578,7 +578,10 @@ def get_movies_by_genre():
 
 @api.route('/search/ai', methods=['POST'])
 def ai_search():
-    """AI-powered semantic search using embeddings"""
+    """
+    AI-powered semantic search using embeddings and TMDB fallback
+    Supports story/content-based search (e.g., "mars movie" finds "The Martian")
+    """
     try:
         data = request.get_json()
         query = data.get('query', '').strip()
@@ -591,25 +594,45 @@ def ai_search():
         
         logger.info(f"AI search query: {query}, limit: {limit}")
         
-        # Use recommender's search capabilities
+        # Step 1: Try semantic search in database
         results = recommender.semantic_search(
             query=query,
             n=limit,
             include_tv_series=include_tv
         )
         
+        # Step 2: If insufficient results, search TMDB with AI keywords
+        if len(results) < 5:
+            logger.info(f"Insufficient AI results, searching TMDB...")
+            
+            # Extract keywords for TMDB search
+            search_terms = query.lower()
+            
+            from ai.content_pipeline import pipeline
+            tmdb_results = pipeline.fetch_on_demand(search_query=search_terms)
+            
+            # Re-run semantic search after storing new content
+            if tmdb_results:
+                results = recommender.semantic_search(
+                    query=query,
+                    n=limit,
+                    include_tv_series=include_tv
+                )
+                logger.info(f"After TMDB fetch: {len(results)} results")
+        
         return jsonify({
             'results': results,
             'query': query,
             'count': len(results),
-            'ai_powered': True
+            'ai_powered': True,
+            'message': 'AI-powered semantic search with story understanding'
         }), 200
         
     except Exception as e:
         logger.error(f"AI search error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': 'Search failed'}), 500
+        return jsonify({'error': 'Search failed'}), 500, 500
         
         # Add explanation if user is logged in
         explanation = None
@@ -629,20 +652,40 @@ def ai_search():
 
 @api.route('/movie/search', methods=['GET'])
 def search_movies():
-    """Search for movies"""
+    """
+    Aggressive hybrid search - ALWAYS fetches from TMDB first
+    1. Fetch from TMDB API first (get latest content)
+    2. Store in database
+    3. Search database and return results
+    """
     try:
         query = request.args.get('q', '')
-        limit = request.args.get('limit', 20, type=int)
+        limit = request.args.get('limit', 50, type=int)
         
         if not query:
             return jsonify({'error': 'Search query required'}), 400
         
-        movies = db.search_movies(query, limit=limit)
+        logger.info(f"🔍 Searching for: '{query}'")
+        
+        # Step 1: ALWAYS fetch from TMDB first
+        logger.info(f"📡 Fetching from TMDB API...")
+        
+        from ai.content_pipeline import pipeline
+        try:
+            tmdb_movies = pipeline.fetch_on_demand(search_query=query)
+            logger.info(f"✅ TMDB returned {len(tmdb_movies) if tmdb_movies else 0} movies")
+        except Exception as e:
+            logger.error(f"⚠️ TMDB fetch failed: {e}")
+        
+        # Step 2: Search database (now includes fresh TMDB results)
+        db_movies = db.search_movies(query, limit=limit)
+        logger.info(f"📊 Final result: {len(db_movies)} movies")
         
         return jsonify({
             'query': query,
-            'movies': movies,
-            'count': len(movies)
+            'movies': db_movies,
+            'count': len(db_movies),
+            'source': 'tmdb+database'
         }), 200
         
     except Exception as e:
@@ -770,6 +813,45 @@ def get_cache_stats():
         import traceback
         traceback.print_exc()
         return jsonify({'error': 'Internal server error'}), 500
+
+
+@api.route('/test/tmdb', methods=['GET'])
+def test_tmdb():
+    """Test TMDB API - Use this to verify TMDB is working"""
+    try:
+        query = request.args.get('q', 'mission impossible')
+        
+        from tmdb.fetcher import TMDBFetcher
+        fetcher = TMDBFetcher()
+        
+        # Test search
+        results = fetcher.search_movies(query, page=1)
+        
+        if results and 'results' in results:
+            return jsonify({
+                'status': '✅ SUCCESS',
+                'query': query,
+                'total_results': results.get('total_results', 0),
+                'page': results.get('page', 1),
+                'movies_found': len(results['results']),
+                'titles': [m.get('title', 'N/A') for m in results['results'][:10]],
+                'api_working': True
+            }), 200
+        else:
+            return jsonify({
+                'status': '❌ FAILED',
+                'error': 'No results from TMDB',
+                'api_working': False
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"TMDB test error: {e}")
+        import traceback
+        return jsonify({
+            'status': '❌ ERROR',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 
 @api.route('/cache/monitor', methods=['GET'])

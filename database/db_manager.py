@@ -183,15 +183,61 @@ class DatabaseManager:
             return cursor.fetchall()
     
     def search_movies(self, search_term, limit=20):
-        """Search movies by title"""
+        """
+        Smart search with prioritization:
+        1. Exact title matches (highest priority)
+        2. Title starts with search term
+        3. Title contains search term
+        4. Overview/story contains search term
+        """
+        search_lower = search_term.lower()
+        
+        # Multi-tier search with relevance scoring
+        # Query base tables directly for better control
         query = """
-            SELECT * FROM movie_details
-            WHERE MATCH(title, overview) AGAINST(%s IN NATURAL LANGUAGE MODE)
+            SELECT 
+                m.*,
+                GROUP_CONCAT(DISTINCT g.genre_name ORDER BY g.genre_name SEPARATOR ', ') AS genres,
+                GROUP_CONCAT(DISTINCT d.director_name ORDER BY d.director_name SEPARATOR ', ') AS directors,
+                GROUP_CONCAT(DISTINCT a.actor_name ORDER BY ma.cast_order SEPARATOR ', ') AS cast,
+                CASE
+                    WHEN LOWER(m.title) = %s THEN 1000
+                    WHEN LOWER(m.title) LIKE %s THEN 900
+                    WHEN LOWER(m.title) LIKE %s THEN 800
+                    WHEN LOWER(m.overview) LIKE %s THEN 100
+                    ELSE 50
+                END AS relevance_score
+            FROM movies m
+            LEFT JOIN movie_genres mg ON m.movie_id = mg.movie_id
+            LEFT JOIN genres g ON mg.genre_id = g.genre_id
+            LEFT JOIN movie_directors md ON m.movie_id = md.movie_id
+            LEFT JOIN directors d ON md.director_id = d.director_id
+            LEFT JOIN movie_actors ma ON m.movie_id = ma.movie_id
+            LEFT JOIN actors a ON ma.actor_id = a.actor_id
+            WHERE LOWER(m.title) LIKE %s 
+               OR LOWER(m.overview) LIKE %s
+            GROUP BY m.movie_id
+            ORDER BY relevance_score DESC, m.popularity DESC, m.tmdb_rating DESC
             LIMIT %s
         """
+        
+        exact_match = search_lower
+        starts_with = f"{search_lower}%"
+        contains = f"%{search_lower}%"
+        
         with self.get_cursor() as cursor:
-            cursor.execute(query, (search_term, limit))
-            return cursor.fetchall()
+            cursor.execute(query, (
+                exact_match,      # Exact match
+                starts_with,      # Starts with
+                contains,         # Contains in title
+                contains,         # Contains in overview
+                contains,         # WHERE title LIKE
+                contains,         # WHERE overview LIKE
+                limit
+            ))
+            results = cursor.fetchall()
+        
+        return results
     
     def get_movies_by_genre_and_type(self, genre_name=None, media_type='all', limit=20, offset=0):
         """Get movies/TV series by genre and media type"""
