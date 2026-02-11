@@ -1,144 +1,69 @@
-# CineSense
+# CineSense — AI-Powered Movie Recommendation Platform
 
-AI-powered movie recommendation platform that learns your taste through pairwise comparisons and delivers personalized suggestions using a multi-layered intelligence stack — from ELO-based preference learning to a 13-model deep learning ensemble.
+**An intelligent movie recommendation system powered by deep learning, pairwise preference learning, and reinforcement learning — built with a fully normalized MySQL database and 100K+ movie records from TMDB and MovieLens datasets.**
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
-![Flask](https://img.shields.io/badge/Flask-3.0-green?logo=flask)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.1+-red?logo=pytorch)
-![MySQL](https://img.shields.io/badge/MySQL-8.0+-orange?logo=mysql&logoColor=white)
+---
 
-## Features
+## Tech Stack
 
-- **Pairwise Comparison Engine** — Pick which movie you prefer; the AI learns the rest
-- **Multi-Layer AI** — ELO scoring → content embeddings → reinforcement learning → deep learning ensemble
-- **Explainable Recommendations** — Natural language explanations for every suggestion
-- **Two-Tower Neural Network** — User Tower + Movie Tower architecture (Netflix/YouTube-style)
-- **Hybrid Content-Aware Model** — Collaborative filtering + BERT-based plot understanding
-- **Lazy Loading Architecture** — 77× memory reduction via sliding-window cache + TMDB streaming
-- **Infinite Content** — Access to 1M+ movies through real-time TMDB API integration
-- **Production-Ready** — Candidate generation, diversity reranking, cache monitoring dashboard
+| Layer | Technology |
+|-------|-----------|
+| Backend | Flask 3.0 (Python) |
+| Database | MySQL 8.0+ (3NF, 11 tables) |
+| Deep Learning | PyTorch 2.1+ (NCF, Two-Tower, NeuMF ×13 ensemble) |
+| NLP / Embeddings | Sentence-Transformers (all-MiniLM-L6-v2, 384-dim) |
+| ML Libraries | NumPy, Scikit-learn, Pandas |
+| External API | TMDB API v3 |
+| Frontend | HTML5, CSS3, JavaScript, Jinja2 |
+| Deployment | Gunicorn + Render |
 
-## Quick Start
+## Key Features
+
+- **Pairwise Comparison** — "Which movie do you prefer?" interactions that learn user taste in real-time via ELO ratings (Bradley-Terry model)
+- **13-Model NeuMF Ensemble** — Neural Collaborative Filtering trained on MovieLens-100K (RMSE = 0.8932)
+- **Content-Based Filtering** — Sentence Transformer embeddings for cold-start handling
+- **Reinforcement Learning** — UCB Multi-Armed Bandit for exploration vs exploitation
+- **55-Dimension Feature Vectors** — 20 genre + 10 director + 20 actor + 5 metadata features
+- **Normalized Database** — 11 tables in 3NF with stored procedures, views, and 19 indexes
+
+## Setup
 
 ```bash
-# Clone & setup
-git clone https://github.com/<your-username>/CineSense.git
+# Clone & install
+git clone https://github.com/your-repo/CineSense.git
 cd CineSense
-python -m venv .venv && .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
 
-# Configure environment
-cp .env.example .env   # Edit with your DB & TMDB credentials
-
-# Initialize database
-mysql -u root -p < database/schema.sql
-python database/run_migration.py
-
-# Run
-python app.py
-```
-
-Open [http://localhost:5000](http://localhost:5000)
-
-### Environment Variables
-
-Create a `.env` file:
-
-```env
+# Configure .env
 DB_HOST=localhost
 DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=your_password
 DB_NAME=cinesense
-TMDB_API_KEY=your_tmdb_api_key    # Free from themoviedb.org
-SECRET_KEY=your_secret_key
-```
+TMDB_API_KEY=your_tmdb_api_key
 
-### Data Setup
-
-Download and place in `data/`:
-
-| Dataset | Path | Source |
-|---|---|---|
-| MovieLens 32M | `data/movie-lens_ml-32m/` | [grouplens.org](https://grouplens.org/datasets/movielens/32m/) |
-| TMDB Movies | `data/tmdb/TMDB_movie_dataset_v11.csv` | [kaggle.com](https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies) |
-
-## Model Training
-
-```bash
-# Quick test (~10 min, 100K samples)
-python train_model.py --sample --epochs 5
-
-# Full training (~4-6 hrs CPU, ~1 hr GPU)
-python train_model.py --model-type hybrid --epochs 20
-
-# Complete pipeline (merge → features → train)
+# Initialize database & train models
+mysql -u root -p < database/schema.sql
+python database/run_migration.py
+python scripts/fetch_tmdb_data.py
 python run_pipeline.py
+
+# Run
+python app.py
 ```
 
-Training notebook: [`colab_train_100k.ipynb`](colab_train_100k.ipynb) — runs on Google Colab with GPU.
+App runs at `http://localhost:5000`.
 
-## Tech Stack
+## Documentation
 
-| Layer | Technologies |
-|---|---|
-| **Backend** | Flask, Gunicorn, MySQL 8.0+ |
-| **AI/ML** | PyTorch, Sentence-Transformers (BERT), scikit-learn, NumPy |
-| **Models** | Two-Tower NCF, Hybrid CF+Content, NeuMF V2 Ensemble (13 models) |
-| **Frontend** | Jinja2 templates, vanilla JS, CSS |
-| **Data** | MovieLens-32M, TMDB API |
-| **Deploy** | Render, Heroku (Procfile + gunicorn) |
+| Document | Contents |
+|----------|----------|
+| [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) | Full system architecture, AI/ML pipeline details, module-wise file descriptions, API endpoints, frontend pages, datasets, deployment, and more |
+| [DATABASE_DOCUMENTATION.md](DATABASE_DOCUMENTATION.md) | ER model & diagram, relational schema design, normalization (1NF→3NF), table descriptions, DDL/DML commands, views, stored procedures, indexes |
 
-## Project Structure
+## References
 
-```
-CineSense/
-├── app.py                    # Flask application factory
-├── config.py                 # Centralized configuration
-├── train_model.py            # CLI training entry point
-├── run_pipeline.py           # End-to-end pipeline orchestrator
-├── quick_start.py            # Interactive setup wizard
-│
-├── ai/                       # AI engine (16 modules)
-│   ├── recommender.py        # Main recommendation engine
-│   ├── two_tower_ncf.py      # Two-Tower NCF architecture
-│   ├── hybrid_model.py       # Content-aware hybrid model
-│   ├── neumf_scorer.py       # 13-model NeuMF ensemble
-│   ├── inference_pipeline.py # Production inference pipeline
-│   ├── pairwise_learning.py  # ELO + Bradley-Terry model
-│   ├── reinforcement.py      # Multi-armed bandits
-│   ├── embeddings.py         # Content-based feature vectors
-│   ├── cache_manager.py      # Sliding-window LRU cache
-│   ├── candidate_generator.py# Candidate generation
-│   ├── content_pipeline.py   # Automated content ingestion
-│   └── ...                   # + 5 more modules
-│
-├── api/routes.py             # REST API endpoints
-├── database/                 # MySQL schema, migrations, DB manager
-├── training/                 # Model architectures & training loops
-├── inference/                # Production model serving
-├── preprocessing/            # Data merging & feature engineering
-├── tmdb/fetcher.py           # TMDB API integration
-├── templates/                # Jinja2 HTML templates
-└── static/                   # CSS + JavaScript
-```
-
-## API Overview
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/user/signup` | Create account |
-| `POST` | `/api/user/login` | Login |
-| `GET` | `/api/recommendations` | Personalized recommendations |
-| `GET` | `/api/recommendations/lazy` | Lazy-loaded recommendations |
-| `GET` | `/api/compare` | Pairwise comparison pair |
-| `POST` | `/api/feedback` | Submit user preference |
-| `GET` | `/api/movie/<id>` | Movie details |
-| `GET` | `/api/movie/search?q=` | Search movies |
-| `GET` | `/api/cache/stats` | Cache performance metrics |
-
-> Full technical documentation: [ARCHITECTURE.md](ARCHITECTURE.md)
-
-## License
-
-MIT
+- [MovieLens Dataset — GroupLens](https://grouplens.org/datasets/movielens/)
+- [TMDB API](https://developer.themoviedb.org/docs)
+- [Neural Collaborative Filtering (He et al., 2017)](https://arxiv.org/abs/1708.05031)
+- [Sentence-BERT (Reimers & Gurevych, 2019)](https://arxiv.org/abs/1908.10084)
