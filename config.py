@@ -95,3 +95,10 @@ class Config:
     # Recommendation Pipeline
     USE_CANDIDATE_GENERATION = True  # Enable candidate generation (vs scoring all)
     FINAL_RECOMMENDATION_COUNT = 20  # Return top 20 after ranking candidates
+
+    # Deep Learning Ensemble (NeuMF V2)
+    USE_DL_SCORING = True  # Enable learned genre affinity from NeuMF ensemble
+    DL_SCORE_WEIGHT = 0.15  # Weight of DL genre affinity in final score
+    DL_V2_CHECKPOINT = 'cinesense_v2.pt'  # Phase 2 ensemble (8 models)
+    DL_V1_CHECKPOINT = 'cinesense_model_final.pt'  # Phase 1 ensemble (5 models)
+    DL_ENSEMBLE_RMSE = 0.8932  # Best: Mega optimized

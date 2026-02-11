@@ -2,9 +2,14 @@
 .env
 .env.local
 .env.*.local
+
+# Virtual environments
 venv/
+.venv/
 env/
 ENV/
+
+# Python bytecode
 *.pyc
 __pycache__/
 
@@ -37,3 +42,35 @@ dist/
 # Temporary files
 *.tmp
 *.bak
+
+# ===========================================
+# Large files — DO NOT commit to Git
+# ===========================================
+
+# Datasets (download separately — see README)
+data/movie-lens_ml-32m/
+data/tmdb/
+data/merged.csv
+data/encoded.csv
+
+# Trained model artifacts
+model/*.pt
+model/*.pth
+model/*.npy
+model/*.pkl
+model/*.json
+model/*.csv
+
+# Deep learning cache
+ai/models/*.pt
+ai/models/*.pth
+ai/models/training_history.json
+ai/cache/*.pkl
+ai/cache/*.npy
+ai/cache/*.csv
+
+# Training output images
+*.png
+
+# Archives
+*.zip

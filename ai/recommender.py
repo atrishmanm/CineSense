@@ -13,6 +13,7 @@ from ai.advanced_ai import (
 )
 from ai.cache_manager import cache_manager
 from ai.candidate_generator import candidate_generator
+from ai.neumf_scorer import get_scorer as _get_dl_scorer
 from tmdb.fetcher import TMDBFetcher
 from database.db_manager import db
 from config import Config
@@ -61,6 +62,23 @@ class CineSenseRecommender:
         self.cache = cache_manager  # Sliding window cache
         self.candidate_gen = candidate_generator  # Candidate generation
         self.tmdb = TMDBFetcher()  # Infinite movie stream
+        
+        # Deep Learning ensemble scorer (NeuMF V2)
+        self.dl_scorer = None
+        if Config.USE_DL_SCORING:
+            try:
+                self.dl_scorer = _get_dl_scorer(
+                    v2_path=Config.DL_V2_CHECKPOINT,
+                    v1_path=Config.DL_V1_CHECKPOINT
+                )
+                if self.dl_scorer.is_loaded:
+                    logger.info("✅ DL ensemble scorer loaded (13-model NeuMF, RMSE=0.8932)")
+                else:
+                    logger.warning("DL scorer checkpoints not found — genre affinity disabled")
+                    self.dl_scorer = None
+            except Exception as e:
+                logger.warning(f"DL scorer init failed: {e} — genre affinity disabled")
+                self.dl_scorer = None
         
         # User-specific models
         self.user_models = {}  # user_id -> UserPreferenceModel
@@ -132,6 +150,29 @@ class CineSenseRecommender:
                 self.user_embeddings[user_id] = UserEmbedding(Config.TOTAL_VECTOR_DIM)
         
         return self.user_embeddings[user_id]
+    
+    def _build_user_genre_vec(self, interactions):
+        """
+        Build a user genre preference vector (18-dim, ML100K genre space)
+        from the user's interaction history.  Used by the DL ensemble scorer
+        for genre affinity scoring.
+        """
+        if not self.dl_scorer or not interactions:
+            return np.zeros(18, dtype=np.float32)
+        
+        genre_sum = np.zeros(18, dtype=np.float32)
+        count = 0
+        for inter in interactions[:50]:
+            chosen_id = inter.get('chosen_movie_id')
+            if chosen_id:
+                movie = db.get_movie_by_id(chosen_id)
+                if movie and movie.get('genres'):
+                    genre_sum += self.dl_scorer.tmdb_genre_to_vec(movie['genres'])
+                    count += 1
+        
+        if count > 0:
+            genre_sum /= count
+        return genre_sum
     
     def _movie_to_embedding(self, movie):
         """Convert movie dictionary to embedding"""
@@ -317,6 +358,9 @@ class CineSenseRecommender:
             user_embedding = self._get_user_embedding(user_id)
             user_vector = user_embedding.get_embedding()
             
+            # Build user genre profile for DL scoring (if available)
+            user_genre_vec = self._build_user_genre_vec(interactions) if self.dl_scorer else None
+            
             # Get all movies
             all_movies = db.get_top_movies(limit=500, order_by='elo_score')
             
@@ -353,8 +397,23 @@ class CineSenseRecommender:
                 # 3. Global quality (ELO score, normalized)
                 elo_score = movie.get('elo_score', 1500) / 3000  # Normalize to ~0-1
                 
+                # 4. DL genre affinity (learned from NeuMF ensemble)
+                dl_score = 0.0
+                if self.dl_scorer and user_genre_vec is not None:
+                    movie_genre_vec = self.dl_scorer.tmdb_genre_to_vec(
+                        movie.get('genres', ''))
+                    dl_score = self.dl_scorer.genre_affinity_score(
+                        user_genre_vec, movie_genre_vec)
+                
                 # Combine scores (weighted average)
+                dl_w = Config.DL_SCORE_WEIGHT if self.dl_scorer else 0.0
+                remaining = 1.0 - dl_w
                 final_score = (
+                    remaining * 0.5 / 0.85 * content_score +   # ~50% of remaining
+                    remaining * 0.3 / 0.85 * preference_score + # ~30% of remaining
+                    remaining * 0.2 / 0.85 * elo_score +        # ~20% of remaining (sums to remaining * 1.0/0.85 ≈ remaining when ~0.85)
+                    dl_w * dl_score
+                ) if dl_w > 0 else (
                     0.5 * content_score +
                     0.3 * preference_score +
                     0.2 * elo_score
@@ -365,7 +424,8 @@ class CineSenseRecommender:
                     'recommendation_score': final_score,
                     'content_score': content_score,
                     'preference_score': preference_score,
-                    'elo_score': elo_score
+                    'elo_score': elo_score,
+                    'dl_genre_affinity': dl_score
                 })
             
             # Sort by final score
