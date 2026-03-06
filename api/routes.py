@@ -490,33 +490,40 @@ def submit_feedback():
         chosen_id = data.get('chosen_id')
         
         if not all([movie1_id, movie2_id, chosen_id]):
+            logger.error(f"Missing fields: movie1_id={movie1_id}, movie2_id={movie2_id}, chosen_id={chosen_id}")
             return jsonify({'error': 'Missing required fields'}), 400
         
         if chosen_id not in [movie1_id, movie2_id]:
+            logger.error(f"Invalid chosen_id: {chosen_id} not in [{movie1_id}, {movie2_id}]")
             return jsonify({'error': 'Invalid chosen movie'}), 400
         
-        # Determine rejected movie
-        rejected_id = movie2_id if chosen_id == movie1_id else movie1_id
-        
-        # Process the choice
-        success = recommender.process_user_choice(
-            user_id,
-            chosen_id,
-            rejected_id,
-            session_id=session.get('session_id')
+        # Record interaction using stored procedure (handles Elo automatically)
+        session_id = session.get('session_id', str(user_id))
+        success = db.record_interaction(
+            user_id=user_id,
+            movie_1_id=movie1_id,
+            movie_2_id=movie2_id,
+            chosen_movie_id=chosen_id,
+            session_id=session_id
         )
         
         if not success:
+            logger.error(f"Database operation failed for user {user_id}")
             return jsonify({'error': 'Failed to process feedback'}), 500
+        
+        logger.info(f"Feedback recorded: user={user_id}, chosen={chosen_id}")
         
         return jsonify({
             'message': 'Feedback recorded successfully',
-            'learning': 'AI model updated based on your preference'
+            'learning': 'AI model updated based on your preference',
+            'success': True
         }), 200
         
     except Exception as e:
         logger.error(f"Feedback error: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 
 # ============================================================================
@@ -532,7 +539,10 @@ def get_movie_detail(movie_id):
         if not movie:
             return jsonify({'error': 'Movie not found'}), 404
         
-        return jsonify(movie), 200
+        return jsonify({
+            'movie': movie,
+            'explanation': None
+        }), 200
         
     except Exception as e:
         logger.error(f"Movie detail error: {e}")
@@ -653,44 +663,75 @@ def ai_search():
 @api.route('/movie/search', methods=['GET'])
 def search_movies():
     """
-    Aggressive hybrid search - ALWAYS fetches from TMDB first
-    1. Fetch from TMDB API first (get latest content)
-    2. Store in database
-    3. Search database and return results
+    Enhanced hybrid search with storyline/semantic support
+    1. Search database with semantic/storyline matching
+    2. Fetch from TMDB API if needed (get latest content)
+    3. Return comprehensive results
     """
     try:
         query = request.args.get('q', '')
         limit = request.args.get('limit', 50, type=int)
+        search_type = request.args.get('type', 'storyline')  # title, storyline, semantic
+        user_id = session.get('user_id')
         
         if not query:
             return jsonify({'error': 'Search query required'}), 400
         
-        logger.info(f"🔍 Searching for: '{query}'")
+        logger.info(f"🔍 Searching: '{query}' (type: {search_type})")
         
-        # Step 1: ALWAYS fetch from TMDB first
-        logger.info(f"📡 Fetching from TMDB API...")
-        
-        from ai.content_pipeline import pipeline
+        # Step 1: Try advanced database search with storyline support
         try:
-            tmdb_movies = pipeline.fetch_on_demand(search_query=query)
-            logger.info(f"✅ TMDB returned {len(tmdb_movies) if tmdb_movies else 0} movies")
+            db_movies = db.search_movies_advanced(
+                search_query=query,
+                search_type=search_type,
+                user_id=user_id,
+                limit=limit
+            )
+            logger.info(f"📊 Database search returned {len(db_movies)} results")
         except Exception as e:
-            logger.error(f"⚠️ TMDB fetch failed: {e}")
+            logger.warning(f"Advanced search failed, falling back: {e}")
+            # Fallback to regular search
+            db_movies = db.search_movies(query, limit=limit)
         
-        # Step 2: Search database (now includes fresh TMDB results)
-        db_movies = db.search_movies(query, limit=limit)
+        # Step 2: If insufficient results, fetch from TMDB
+        if len(db_movies) < 5:
+            logger.info(f"📡 Fetching from TMDB to supplement results...")
+            from ai.content_pipeline import pipeline
+            try:
+                tmdb_movies = pipeline.fetch_on_demand(search_query=query)
+                if tmdb_movies:
+                    logger.info(f"✅ TMDB returned {len(tmdb_movies)} movies")
+                    # Re-search database with new content
+                    db_movies = db.search_movies_advanced(
+                        search_query=query,
+                        search_type=search_type,
+                        user_id=user_id,
+                        limit=limit
+                    )
+            except Exception as e:
+                logger.error(f"⚠️ TMDB fetch failed: {e}")
+        
         logger.info(f"📊 Final result: {len(db_movies)} movies")
         
         return jsonify({
             'query': query,
+            'search_type': search_type,
             'movies': db_movies,
             'count': len(db_movies),
-            'source': 'tmdb+database'
+            'source': 'database+tmdb',
+            'supports_storyline': True,
+            'success': True
         }), 200
         
     except Exception as e:
         logger.error(f"Search error: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': 'Internal server error',
+            'details': str(e),
+            'success': False
+        }), 500
 
 
 @api.route('/movie/top-rated', methods=['GET'])
@@ -791,28 +832,51 @@ def get_stats():
 def get_cache_stats():
     """Get cache statistics and monitoring data"""
     try:
-        cache_stats = cache_manager.get_stats()
+        # Get cache stats from database
+        db_cache_stats = db.get_cache_statistics()
         
-        # Get recommender cache stats if available
-        recommender_stats = {}
-        if hasattr(recommender, 'get_cache_stats'):
-            recommender_stats = recommender.get_cache_stats()
+        # Format for response
+        cache_data = {}
+        for stat in db_cache_stats:
+            cache_data[stat['cache_type']] = {
+                'hits': stat['cache_hits'],
+                'misses': stat['cache_misses'],
+                'hit_rate': float(stat['hit_rate']) if stat['hit_rate'] else 0,
+                'avg_response_time_ms': float(stat['avg_response_time_ms']),
+                'memory_usage_kb': stat['memory_usage_kb'],
+                'last_updated': str(stat['recorded_at'])
+            }
+        
+        # Get cache manager stats if available
+        try:
+            cache_manager_stats = cache_manager.get_stats()
+        except:
+            cache_manager_stats = {
+                'movie_cache': {'size': 0, 'max_size': 100, 'hit_rate': 0},
+                'vector_cache': {'size': 0, 'max_size': 500, 'hit_rate': 0}
+            }
         
         return jsonify({
-            'cache_manager': cache_stats,
-            'recommender': recommender_stats,
+            'database_stats': cache_data,
+            'cache_manager': cache_manager_stats,
             'memory_savings': '77x reduction (54MB → 700KB)',
+            'status': 'operational',
             'max_capacity': {
                 'movies': 100,
                 'vectors': 500
-            }
+            },
+            'success': True
         }), 200
         
     except Exception as e:
         logger.error(f"Cache stats error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': 'Internal server error'}), 500
+        return jsonify({
+            'error': 'Internal server error',
+            'details': str(e),
+            'success': False
+        }), 500
 
 
 @api.route('/test/tmdb', methods=['GET'])

@@ -366,20 +366,19 @@ class DatabaseManager:
     # ========================================================================
     
     def record_interaction(self, user_id, movie_1_id, movie_2_id, chosen_movie_id, session_id=None):
-        """Record a user's pairwise choice"""
-        rejected_movie_id = movie_2_id if chosen_movie_id == movie_1_id else movie_1_id
-        
-        query = """
-            INSERT INTO user_interactions 
-            (user_id, movie_1_id, movie_2_id, chosen_movie_id, rejected_movie_id, session_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        with self.get_cursor() as cursor:
-            cursor.execute(query, (
-                user_id, movie_1_id, movie_2_id, 
-                chosen_movie_id, rejected_movie_id, session_id
-            ))
-            return cursor.lastrowid
+        """Record a user's pairwise choice using stored procedure"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor()
+                # Call the stored procedure that handles Elo updates automatically
+                cursor.callproc('record_user_interaction', 
+                    [user_id, movie_1_id, movie_2_id, chosen_movie_id, session_id])
+                connection.commit()
+                cursor.close()
+                return True
+        except Exception as e:
+            logger.error(f"Error recording interaction: {e}")
+            return False
     
     def get_user_interactions(self, user_id, limit=100):
         """Get user's interaction history"""
@@ -489,6 +488,157 @@ class DatabaseManager:
         with self.get_cursor() as cursor:
             cursor.execute(query)
             return cursor.fetchone()['count']
+    
+    # ========================================================================
+    # ENHANCED STORED PROCEDURE OPERATIONS
+    # ========================================================================
+    
+    def search_movies_advanced(self, search_query, search_type='title', user_id=None, limit=50):
+        """Advanced search using stored procedure with storyline/semantic support"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.callproc('search_movies_advanced', 
+                    [search_query, search_type, user_id, limit])
+                
+                # Fetch results from the procedure
+                results = []
+                for result in cursor.stored_results():
+                    results = result.fetchall()
+                
+                connection.commit()
+                cursor.close()
+                return results
+        except Exception as e:
+            logger.error(f"Error in advanced search: {e}")
+            # Fallback to regular search
+            return self.search_movies(search_query, limit)
+    
+    def get_personalized_recommendations_sp(self, user_id, limit=20):
+        """Get personalized recommendations using stored procedure with cursor"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.callproc('get_personalized_recommendations', [user_id, limit])
+                
+                # Fetch results
+                results = []
+                for result in cursor.stored_results():
+                    results = result.fetchall()
+                
+                connection.commit()
+                cursor.close()
+                return results
+        except Exception as e:
+            logger.error(f"Error getting personalized recommendations: {e}")
+            return []
+    
+    def get_comparison_pair_sp(self, user_id):
+        """Get comparison pair using stored procedure"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.callproc('get_comparison_pair', [user_id])
+                
+                # Fetch results
+                results = []
+                for result in cursor.stored_results():
+                    results = result.fetchall()
+                
+                connection.commit()
+                cursor.close()
+                
+                # Return two movies if available
+                if len(results) >= 2:
+                    return results[0], results[1]
+                return None, None
+        except Exception as e:
+            logger.error(f"Error getting comparison pair: {e}")
+            return None, None
+    
+    def update_user_preferences_sp(self, user_id):
+        """Update user preferences using stored procedure"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor()
+                cursor.callproc('update_user_preferences', [user_id])
+                connection.commit()
+                cursor.close()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating user preferences: {e}")
+            return False
+    
+    def update_cache_stats(self, cache_type, hits, misses, response_time_ms, memory_usage_kb):
+        """Update cache statistics using stored procedure"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor()
+                cursor.callproc('update_cache_stats', 
+                    [cache_type, hits, misses, response_time_ms, memory_usage_kb])
+                connection.commit()
+                cursor.close()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating cache stats: {e}")
+            return False
+    
+    def get_cache_statistics(self):
+        """Get cache statistics from database"""
+        query = """
+            SELECT 
+                cache_type,
+                cache_hits,
+                cache_misses,
+                ROUND((cache_hits / NULLIF(cache_hits + cache_misses, 0)) * 100, 2) as hit_rate,
+                avg_response_time_ms,
+                memory_usage_kb,
+                recorded_at
+            FROM cache_stats
+            WHERE stat_date = CURRENT_DATE
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query)
+            results = cursor.fetchall()
+            return results if results else []
+    
+    def insert_movie_keyword(self, movie_id, keyword, relevance_score=1.0):
+        """Insert movie keyword for semantic search"""
+        query = """
+            INSERT INTO movie_keywords (movie_id, keyword, relevance_score)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE relevance_score = VALUES(relevance_score)
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (movie_id, keyword, relevance_score))
+    
+    def get_comprehensive_movie_view(self, movie_id):
+        """Get comprehensive movie details from view"""
+        query = "SELECT * FROM comprehensive_movie_view WHERE movie_id = %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (movie_id,))
+            return cursor.fetchone()
+    
+    def get_advanced_user_stats(self, user_id):
+        """Get advanced user statistics from view"""
+        query = "SELECT * FROM advanced_user_stats WHERE user_id = %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id,))
+            return cursor.fetchone()
+    
+    def get_genre_popularity(self):
+        """Get genre popularity statistics"""
+        query = "SELECT * FROM genre_popularity_view ORDER BY popularity_rank"
+        with self.get_cursor() as cursor:
+            cursor.execute(query)
+            return cursor.fetchall()
+    
+    def get_trending_movies(self, limit=20):
+        """Get trending movies from view"""
+        query = "SELECT * FROM trending_movies_view LIMIT %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (limit,))
+            return cursor.fetchall()
 
 
 # Singleton instance

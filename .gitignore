@@ -1,51 +1,129 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
+# ==========================================
+# Python
+# ==========================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
 
 # Virtual environments
 venv/
 .venv/
 env/
 ENV/
+env.bak/
+venv.bak/
 
-# Python bytecode
-*.pyc
-__pycache__/
-
-# Database
-*.sql.backup
-*.db
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Distribution
+# Distribution / packaging
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+coverage.xml
+*.cover
+*.log
 
+# ==========================================
+# Environment & Configuration
+# ==========================================
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+config_local.py
+
+# ==========================================
+# IDE & Editors
+# ==========================================
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# Database
+# ==========================================
+
+*.sql.backup
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# OS-specific
+# ==========================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ==========================================
 # Temporary files
+# ==========================================
+
 *.tmp
 *.bak
+*.swp
+*.swo
+.temp/
+temp/
 
-# ===========================================
+# ==========================================
 # Large files — DO NOT commit to Git
-# ===========================================
+# ==========================================
 
 # Datasets (download separately — see README)
 data/movie-lens_ml-32m/
@@ -74,3 +152,13 @@ ai/cache/*.csv
 
 # Archives
 *.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ==========================================
+# Jupyter Notebook
+# ==========================================
+
+.ipynb_checkpoints
+*.ipynb

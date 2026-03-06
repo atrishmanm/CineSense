@@ -144,13 +144,26 @@
             const response = await fetch(`/api/movie/${movieId}`);
             const data = await response.json();
             
-            if (data.movie) {
-                currentMovie = data.movie;
-                displayMovie(data.movie, data.explanation);
+            // Handle both response formats: {movie: ...} or direct movie object
+            const movie = data.movie || data;
+            const explanation = data.explanation || null;
+            
+            if (movie && movie.movie_id) {
+                currentMovie = movie;
+                displayMovie(movie, explanation);
+            } else {
+                throw new Error('Invalid movie data received');
             }
         } catch (error) {
             console.error('Error loading movie:', error);
-            alert('Failed to load movie details');
+            document.getElementById('detail-loading').innerHTML = `
+                <div class="text-center">
+                    <p class="text-red-500 text-xl mb-4">Failed to load movie details</p>
+                    <button onclick="window.history.back()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg">
+                        Go Back
+                    </button>
+                </div>
+            `;
         }
     }
     

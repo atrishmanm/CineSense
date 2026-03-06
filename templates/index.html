@@ -265,6 +265,11 @@
         const searchInput = document.getElementById('ai-search');
         const searchIndicator = document.getElementById('ai-search-indicator');
         
+        // Exit early if elements don't exist
+        if (!searchInput || !searchIndicator) {
+            return;
+        }
+        
         let searchTimeout;
         searchInput.addEventListener('input', (e) => {
             clearTimeout(searchTimeout);

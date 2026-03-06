@@ -1,3 +1,4 @@
+-- Active: 1768449834747@@127.0.0.1@3306@cinesense
 -- CineSense Database Schema
 -- Fully Normalized (3NF) Design
 -- MySQL 8.0+

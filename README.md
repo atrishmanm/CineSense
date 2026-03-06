@@ -9,7 +9,7 @@
 | Layer | Technology |
 |-------|-----------|
 | Backend | Flask 3.0 (Python) |
-| Database | MySQL 8.0+ (3NF, 11 tables) |
+| Database | MySQL 8.0+ (3NF, 16 tables, 12 views, 8 stored procedures, 4 functions, 5 triggers) |
 | Deep Learning | PyTorch 2.1+ (NCF, Two-Tower, NeuMF ×13 ensemble) |
 | NLP / Embeddings | Sentence-Transformers (all-MiniLM-L6-v2, 384-dim) |
 | ML Libraries | NumPy, Scikit-learn, Pandas |
@@ -24,7 +24,8 @@
 - **Content-Based Filtering** — Sentence Transformer embeddings for cold-start handling
 - **Reinforcement Learning** — UCB Multi-Armed Bandit for exploration vs exploitation
 - **55-Dimension Feature Vectors** — 20 genre + 10 director + 20 actor + 5 metadata features
-- **Normalized Database** — 11 tables in 3NF with stored procedures, views, and 19 indexes
+- **Advanced DBMS Features** — 16 normalized tables, 12 analytical views, 8 stored procedures, 4 custom functions, 5 automated triggers, 19+ indexes
+- **Cache Management** — Smart content caching with database-backed statistics
 
 ## Setup
 
@@ -43,7 +44,7 @@ DB_NAME=cinesense
 TMDB_API_KEY=your_tmdb_api_key
 
 # Initialize database & train models
-mysql -u root -p < database/schema.sql
+mysql -u root -p < database/enhanced_schema.sql
 python database/run_migration.py
 python scripts/fetch_tmdb_data.py
 python run_pipeline.py
@@ -56,10 +57,12 @@ App runs at `http://localhost:5000`.
 
 ## Documentation
 
-| Document | Contents |
-|----------|----------|
-| [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) | Full system architecture, AI/ML pipeline details, module-wise file descriptions, API endpoints, frontend pages, datasets, deployment, and more |
-| [DATABASE_DOCUMENTATION.md](DATABASE_DOCUMENTATION.md) | ER model & diagram, relational schema design, normalization (1NF→3NF), table descriptions, DDL/DML commands, views, stored procedures, indexes |
+See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for comprehensive details on:
+- System architecture and AI/ML pipeline
+- Database schema and DBMS features (views, stored procedures, triggers, functions)
+- Module-wise file descriptions
+- API endpoints and frontend pages
+- Dataset information and deployment guide
 
 ## References
 
