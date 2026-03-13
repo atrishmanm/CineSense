@@ -7,6 +7,9 @@ import requests
 import time
 from config import Config
 import logging
+import os
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,6 +23,19 @@ class TMDBFetcher:
         self.base_url = Config.TMDB_BASE_URL
         self.image_base_url = Config.TMDB_IMAGE_BASE_URL
         self.session = requests.Session()
+        self.timeout = float(os.getenv('TMDB_TIMEOUT_SECONDS', '6'))
+        retry = Retry(
+            total=1,
+            connect=1,
+            read=1,
+            backoff_factor=0.3,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({'GET'}),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount('https://', adapter)
+        self.session.mount('http://', adapter)
     
     def _make_request(self, endpoint, params=None):
         """Make API request with error handling"""
@@ -30,9 +46,12 @@ class TMDBFetcher:
         url = f"{self.base_url}/{endpoint}"
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.Timeout:
+            logger.warning(f"TMDB request timed out: endpoint={endpoint}")
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(f"TMDB API request failed: {e}")
             return None

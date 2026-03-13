@@ -2,7 +2,7 @@
 param([switch]$CheckMySQL = $true, [switch]$OpenBrowser = $true, [string]$Port = "5000")
 
 $ProjectRoot = "c:\Users\Atrishman\Documents\VS CODE\PROJECTS\CineSense"
-$AppScript = "app.py"
+$AppScript = "app_integrated.py"
 $ServerURL = "http://localhost:$Port"
 
 function Write-ColorOutput { param([string]$Message, [string]$Color = "White"); Write-Host $Message -ForegroundColor $Color }

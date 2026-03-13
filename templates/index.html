@@ -161,6 +161,42 @@
             </div>
         </div>
         
+        <!-- AI Features Quick Access -->
+        <div>
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl md:text-3xl font-bold">AI-Powered Features</h2>
+                <a href="/features" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-semibold transition">
+                    View All
+                </a>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- Chat AI -->
+                <a href="/chat-ui" class="group bg-gradient-to-br from-purple-900/40 to-indigo-900/40 border border-purple-700/30 rounded-xl p-6 hover:border-purple-500/60 transition-all hover:scale-[1.02]">
+                    <div class="text-4xl mb-3">💬</div>
+                    <h3 class="text-lg font-bold mb-2 group-hover:text-purple-300 transition">AI Chat</h3>
+                    <p class="text-gray-400 text-sm">Ask for movie recommendations in natural language</p>
+                </a>
+                <!-- Mood Recommendations -->
+                <a href="/search" class="group bg-gradient-to-br from-pink-900/40 to-rose-900/40 border border-pink-700/30 rounded-xl p-6 hover:border-pink-500/60 transition-all hover:scale-[1.02]">
+                    <div class="text-4xl mb-3">🎭</div>
+                    <h3 class="text-lg font-bold mb-2 group-hover:text-pink-300 transition">Mood Search</h3>
+                    <p class="text-gray-400 text-sm">Find movies that match your current mood</p>
+                </a>
+                <!-- Trending -->
+                <a href="/category/trending" class="group bg-gradient-to-br from-orange-900/40 to-amber-900/40 border border-orange-700/30 rounded-xl p-6 hover:border-orange-500/60 transition-all hover:scale-[1.02]">
+                    <div class="text-4xl mb-3">🔥</div>
+                    <h3 class="text-lg font-bold mb-2 group-hover:text-orange-300 transition">Trending</h3>
+                    <p class="text-gray-400 text-sm">See what's trending and going viral right now</p>
+                </a>
+                <!-- Social / Friends -->
+                <a href="/friends" class="group bg-gradient-to-br from-cyan-900/40 to-teal-900/40 border border-cyan-700/30 rounded-xl p-6 hover:border-cyan-500/60 transition-all hover:scale-[1.02]">
+                    <div class="text-4xl mb-3">👥</div>
+                    <h3 class="text-lg font-bold mb-2 group-hover:text-cyan-300 transition">Social</h3>
+                    <p class="text-gray-400 text-sm">Connect with friends and share recommendations</p>
+                </a>
+            </div>
+        </div>
+
         <!-- Start Comparing CTA -->
         <div class="bg-gradient-to-r from-red-900/30 to-pink-900/30 rounded-2xl p-12 text-center border border-red-600/20">
             <h2 class="text-4xl font-black mb-4">Get Personalized Recommendations</h2>
@@ -217,13 +253,17 @@
     };
 
     document.addEventListener('DOMContentLoaded', async () => {
-        await loadComparedMovies();
-        await loadCarousel();
-        await loadAllSections();
-        initializeHorizontalScroll();
-        initializeFilters();
-        initializeAISearch();
-        startCarousel();
+        try {
+            await loadComparedMovies();
+            await loadCarousel();
+            await loadAllSections();
+            initializeHorizontalScroll();
+            initializeFilters();
+            initializeAISearch();
+            startCarousel();
+        } catch (err) {
+            console.error('Page init error:', err);
+        }
     });
     
     // Load compared movies for filtering
@@ -390,24 +430,30 @@
         const track = document.getElementById('carousel-track');
         const dotsContainer = document.getElementById('carousel-dots');
         
+        if (!track || !dotsContainer || carouselMovies.length === 0) return;
+        
         track.innerHTML = carouselMovies.map((movie, index) => {
+            const title = movie.title || 'Untitled';
             const backdropUrl = movie.backdrop_path 
                 ? `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}`
-                : `https://image.tmdb.org/t/p/w780${movie.poster_path}`;
+                : movie.poster_path 
+                    ? `https://image.tmdb.org/t/p/w780${movie.poster_path}`
+                    : `https://via.placeholder.com/1280x720/1a1a1a/666666?text=${encodeURIComponent(title)}`;
+            const rating = (movie.tmdb_rating != null) ? Number(movie.tmdb_rating).toFixed(1) : 'N/A';
             
             return `
                 <div class="min-w-full h-full relative">
-                    <img src="${backdropUrl}" class="absolute inset-0 w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/1280x720/1a1a1a/666666?text=${encodeURIComponent(movie.title)}';" loading="lazy" />
+                    <img src="${backdropUrl}" class="absolute inset-0 w-full h-full object-cover" onerror="this.onerror=null; this.src='https://via.placeholder.com/1280x720/1a1a1a/666666?text=${encodeURIComponent(title)}';" loading="lazy" />
                     <div class="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-transparent"></div>
                     <div class="relative h-full flex items-center">
                         <div class="container mx-auto px-8 md:px-12 max-w-2xl">
-                            <h1 class="text-5xl md:text-7xl font-black mb-4 drop-shadow-lg">${movie.title}</h1>
+                            <h1 class="text-5xl md:text-7xl font-black mb-4 drop-shadow-lg">${title}</h1>
                             <div class="flex items-center gap-4 mb-6">
                                 <span class="flex items-center text-yellow-400 font-bold text-lg">
                                     <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
                                     </svg>
-                                    ${movie.tmdb_rating || 'N/A'}
+                                    ${rating}
                                 </span>
                                 <span class="text-gray-300">${movie.release_year || ''}</span>
                             </div>
@@ -497,6 +543,16 @@
     }
     
     async function loadSection(sectionName, url) {
+        const container = document.getElementById(`${sectionName}-scroll`);
+        if (!container) return;
+        
+        // Show loading skeletons
+        container.innerHTML = Array(6).fill(0).map(() => `
+            <div class="flex-shrink-0 w-48">
+                <div class="rounded-lg aspect-[2/3] bg-gray-800 animate-pulse"></div>
+            </div>
+        `).join('');
+        
         try {
             const response = await fetch(url);
             const data = await response.json();
@@ -514,10 +570,9 @@
                 return true;
             });
             
-            const container = document.getElementById(`${sectionName}-scroll`);
-            if (!container) return;
-            
-            container.innerHTML = movies.map(movie => createHorizontalCard(movie)).join('');
+            container.innerHTML = movies.length > 0 
+                ? movies.map(movie => createHorizontalCard(movie)).join('')
+                : '<p class="text-gray-500 py-8">No movies found</p>';
             
             // Update tracking
             const section = scrollSections[sectionName];
@@ -530,18 +585,24 @@
             }
         } catch (error) {
             console.error(`Error loading ${sectionName}:`, error);
+            if (container) {
+                container.innerHTML = '<p class="text-gray-500 py-8">Failed to load movies</p>';
+            }
         }
     }
     
     function createHorizontalCard(movie) {
+        const title = movie.title || 'Untitled';
         const posterUrl = movie.poster_path 
             ? `https://image.tmdb.org/t/p/w342${movie.poster_path}`
-            : 'https://via.placeholder.com/342x513/1a1a1a/666666?text=No+Poster';
+            : `https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(title)}`;
+        const rating = (movie.tmdb_rating != null && movie.tmdb_rating !== 0) 
+            ? Number(movie.tmdb_rating).toFixed(1) : 'N/A';
         
         return `
             <div class="flex-shrink-0 w-48 group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
                 <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl">
-                    <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(movie.title)}';" />
+                    <img src="${posterUrl}" alt="${title}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(title)}';" />
                     <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                         <div class="absolute bottom-0 left-0 right-0 p-3">
                             <div class="flex items-center justify-between mb-1">
@@ -549,11 +610,11 @@
                                     <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
                                     </svg>
-                                    ${movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A'}
+                                    ${rating}
                                 </span>
                                 <span class="text-xs text-gray-300">${movie.release_year || ''}</span>
                             </div>
-                            <h3 class="font-bold text-xs line-clamp-2">${movie.title}</h3>
+                            <h3 class="font-bold text-xs line-clamp-2">${title}</h3>
                         </div>
                     </div>
                 </div>

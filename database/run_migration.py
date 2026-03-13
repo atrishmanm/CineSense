@@ -3,10 +3,18 @@ Database Migration Runner
 Applies lazy loading migrations to the CineSense database
 """
 
-import mysql.connector
-from config import Config
 import os
 import logging
+import sys
+from pathlib import Path
+
+import mysql.connector
+
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,17 +35,77 @@ class MigrationRunner:
     def connect(self):
         """Connect to database"""
         try:
+            db_conf = self.config.DB_CONFIG
             self.connection = mysql.connector.connect(
-                host=self.config.DB_HOST,
-                user=self.config.DB_USER,
-                password=self.config.DB_PASSWORD,
-                database=self.config.DB_NAME,
-                port=self.config.DB_PORT
+                host=db_conf['host'],
+                user=db_conf['user'],
+                password=db_conf['password'],
+                database=db_conf['database'],
+                port=db_conf['port']
             )
-            logger.info(f"Connected to database: {self.config.DB_NAME}")
+            logger.info(f"Connected to database: {db_conf['database']}")
             return True
         except mysql.connector.Error as err:
             logger.error(f"Database connection failed: {err}")
+            return False
+
+    def run_schema_file(self, schema_path):
+        """Execute full schema.sql with MySQL script support."""
+        try:
+            if not os.path.exists(schema_path):
+                logger.error(f"Schema file not found: {schema_path}")
+                return False
+
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                sql_content = f.read()
+
+            cursor = self.connection.cursor()
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+
+            statements = []
+            current_delimiter = ';'
+            current_statement = ''
+
+            for raw_line in sql_content.split('\n'):
+                line = raw_line.strip()
+
+                if not line or line.startswith('--'):
+                    continue
+
+                if line.upper().startswith('DELIMITER'):
+                    parts = line.split()
+                    if len(parts) > 1:
+                        current_delimiter = parts[1]
+                    continue
+
+                current_statement += raw_line + '\n'
+                if current_statement.rstrip().endswith(current_delimiter):
+                    statement = current_statement.rstrip()
+                    statement = statement[: -len(current_delimiter)].strip()
+                    if statement:
+                        statements.append(statement)
+                    current_statement = ''
+
+            for statement in statements:
+                cursor.execute(statement)
+                if getattr(cursor, 'with_rows', False):
+                    cursor.fetchall()
+
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+            self.connection.commit()
+            cursor.close()
+            logger.info(f"Schema applied successfully: {schema_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to apply schema file: {e}")
+            try:
+                cleanup_cursor = self.connection.cursor()
+                cleanup_cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+                cleanup_cursor.close()
+            except Exception:
+                pass
+            self.connection.rollback()
             return False
     
     def disconnect(self):
@@ -197,10 +265,13 @@ class MigrationRunner:
     def run_all_migrations(self):
         """Run all pending migrations"""
         try:
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+
             # Check if migrations directory exists
             if not os.path.exists(self.migrations_dir):
                 logger.warning(f"Migrations directory not found: {self.migrations_dir}")
-                return False
+                logger.info("Falling back to authoritative schema.sql")
+                return self.run_schema_file(schema_path)
             
             # Get all .sql files
             migration_files = sorted([
@@ -210,7 +281,8 @@ class MigrationRunner:
             
             if not migration_files:
                 logger.info("No migration files found")
-                return True
+                logger.info("Applying authoritative schema.sql")
+                return self.run_schema_file(schema_path)
             
             logger.info(f"Found {len(migration_files)} migration file(s)")
             

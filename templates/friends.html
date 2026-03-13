@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block title %}CineSense - Friends & Social{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-6 py-8 max-w-6xl">
+    
+    <!-- Page Header -->
+    <div class="mb-8">
+        <h1 class="text-4xl font-bold mb-2">Friends & Social</h1>
+        <p class="text-gray-400">Connect with friends, get recommendations, and watch together</p>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="flex gap-2 mb-8 border-b border-gray-800 pb-2">
+        <button onclick="showTab('friends')" id="tab-friends" class="tab-btn px-6 py-3 rounded-t-lg font-semibold transition bg-indigo-600 text-white">
+            Friends
+        </button>
+        <button onclick="showTab('requests')" id="tab-requests" class="tab-btn px-6 py-3 rounded-t-lg font-semibold transition bg-gray-800 text-gray-400 hover:text-white">
+            Requests <span id="request-count" class="ml-1 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full hidden">0</span>
+        </button>
+        <button onclick="showTab('recommendations')" id="tab-recommendations" class="tab-btn px-6 py-3 rounded-t-lg font-semibold transition bg-gray-800 text-gray-400 hover:text-white">
+            Friend Recs
+        </button>
+        <button onclick="showTab('watchparty')" id="tab-watchparty" class="tab-btn px-6 py-3 rounded-t-lg font-semibold transition bg-gray-800 text-gray-400 hover:text-white">
+            Watch Parties
+        </button>
+    </div>
+
+    <!-- Friends Tab -->
+    <div id="content-friends" class="tab-content">
+        <!-- Add Friend -->
+        <div class="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Add a Friend</h3>
+            <div class="flex gap-4">
+                <input type="text" id="friend-username" placeholder="Enter username..." 
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button onclick="searchAndAddFriend()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition">
+                    Send Request
+                </button>
+            </div>
+            <p id="add-friend-msg" class="mt-2 text-sm hidden"></p>
+        </div>
+        
+        <!-- Friends List -->
+        <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Your Friends</h3>
+            <div id="friends-list" class="space-y-3">
+                <div class="text-gray-500 text-center py-8">Loading friends...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Friend Requests Tab -->
+    <div id="content-requests" class="tab-content hidden">
+        <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Pending Friend Requests</h3>
+            <div id="requests-list" class="space-y-3">
+                <div class="text-gray-500 text-center py-8">Loading requests...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Friend Recommendations Tab -->
+    <div id="content-recommendations" class="tab-content hidden">
+        <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Movies Your Friends Love</h3>
+            <div id="friend-recs-list" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                <div class="text-gray-500 text-center py-8 col-span-full">Loading recommendations...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Watch Parties Tab -->
+    <div id="content-watchparty" class="tab-content hidden">
+        <!-- Create Watch Party -->
+        <div class="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Create a Watch Party</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <input type="number" id="wp-movie-id" placeholder="Movie ID" 
+                    class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input type="datetime-local" id="wp-time" 
+                    class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button onclick="createWatchParty()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold transition">
+                    Create Party
+                </button>
+            </div>
+            <p id="wp-msg" class="mt-2 text-sm hidden"></p>
+        </div>
+        
+        <!-- Upcoming Parties -->
+        <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Upcoming Watch Parties</h3>
+            <div id="watchparty-list" class="space-y-4">
+                <div class="text-gray-500 text-center py-8">Loading watch parties...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Tab management
+    function showTab(tabName) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+        document.querySelectorAll('.tab-btn').forEach(el => {
+            el.classList.remove('bg-indigo-600', 'text-white');
+            el.classList.add('bg-gray-800', 'text-gray-400');
+        });
+        
+        document.getElementById(`content-${tabName}`).classList.remove('hidden');
+        const activeTab = document.getElementById(`tab-${tabName}`);
+        activeTab.classList.remove('bg-gray-800', 'text-gray-400');
+        activeTab.classList.add('bg-indigo-600', 'text-white');
+        
+        // Load content on tab switch
+        if (tabName === 'friends') loadFriends();
+        if (tabName === 'requests') loadRequests();
+        if (tabName === 'recommendations') loadFriendRecs();
+        if (tabName === 'watchparty') loadWatchParties();
+    }
+
+    // Load friends list
+    async function loadFriends() {
+        try {
+            const response = await fetch('/api/social/friends/list');
+            const data = await response.json();
+            
+            const container = document.getElementById('friends-list');
+            if (data.error) {
+                container.innerHTML = `<div class="text-yellow-400 text-center py-4">${data.error}</div>`;
+                return;
+            }
+            
+            const friends = data.friends || [];
+            if (friends.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-8">No friends yet. Send a friend request!</div>';
+                return;
+            }
+            
+            container.innerHTML = friends.map(f => `
+                <div class="flex items-center justify-between bg-gray-800 rounded-lg p-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center font-bold text-lg">
+                            ${(f.username || '?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                            <div class="font-semibold">${f.username}</div>
+                            <div class="text-sm text-gray-400">${f.email || ''}</div>
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        Friends since ${new Date(f.created_at).toLocaleDateString()}
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            document.getElementById('friends-list').innerHTML = 
+                '<div class="text-gray-500 text-center py-8">Could not load friends. Please log in first.</div>';
+        }
+    }
+
+    // Load friend requests
+    async function loadRequests() {
+        try {
+            const response = await fetch('/api/social/friends/requests');
+            const data = await response.json();
+            
+            const container = document.getElementById('requests-list');
+            if (data.error) {
+                container.innerHTML = `<div class="text-yellow-400 text-center py-4">${data.error}</div>`;
+                return;
+            }
+            
+            const requests = data.requests || [];
+            const countBadge = document.getElementById('request-count');
+            if (requests.length > 0) {
+                countBadge.textContent = requests.length;
+                countBadge.classList.remove('hidden');
+            } else {
+                countBadge.classList.add('hidden');
+            }
+            
+            if (requests.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-8">No pending requests</div>';
+                return;
+            }
+            
+            container.innerHTML = requests.map(r => `
+                <div class="flex items-center justify-between bg-gray-800 rounded-lg p-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center font-bold text-lg">
+                            ${(r.username || '?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                            <div class="font-semibold">${r.username}</div>
+                            <div class="text-sm text-gray-400">Sent ${new Date(r.created_at).toLocaleDateString()}</div>
+                        </div>
+                    </div>
+                    <button onclick="acceptRequest(${r.request_id})" 
+                        class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-semibold transition">
+                        Accept
+                    </button>
+                </div>
+            `).join('');
+        } catch (error) {
+            document.getElementById('requests-list').innerHTML = 
+                '<div class="text-gray-500 text-center py-8">Could not load requests. Please log in first.</div>';
+        }
+    }
+
+    // Accept friend request
+    async function acceptRequest(requestId) {
+        try {
+            const response = await fetch('/api/social/friends/accept', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ request_id: requestId })
+            });
+            const data = await response.json();
+            if (data.message) {
+                loadRequests();
+                loadFriends();
+            }
+        } catch (error) {
+            console.error('Accept request error:', error);
+        }
+    }
+
+    // Search and add friend
+    async function searchAndAddFriend() {
+        const username = document.getElementById('friend-username').value.trim();
+        const msg = document.getElementById('add-friend-msg');
+        
+        if (!username) {
+            msg.textContent = 'Please enter a username';
+            msg.className = 'mt-2 text-sm text-red-400';
+            msg.classList.remove('hidden');
+            return;
+        }
+        
+        try {
+            // For now, send friend request by username - the backend needs the user_id
+            // We'll search for the user first
+            const response = await fetch('/api/social/friends/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ friend_username: username })
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                msg.textContent = data.error;
+                msg.className = 'mt-2 text-sm text-red-400';
+            } else {
+                msg.textContent = data.message || 'Friend request sent!';
+                msg.className = 'mt-2 text-sm text-green-400';
+                document.getElementById('friend-username').value = '';
+            }
+            msg.classList.remove('hidden');
+        } catch (error) {
+            msg.textContent = 'Failed to send request. Make sure you are logged in.';
+            msg.className = 'mt-2 text-sm text-red-400';
+            msg.classList.remove('hidden');
+        }
+    }
+
+    // Load friend recommendations
+    async function loadFriendRecs() {
+        try {
+            const response = await fetch('/api/social/recommendations/friends');
+            const data = await response.json();
+            
+            const container = document.getElementById('friend-recs-list');
+            const recs = data.recommendations || [];
+            
+            if (recs.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-8 col-span-full">Add friends to see their movie recommendations!</div>';
+                return;
+            }
+            
+            container.innerHTML = recs.map(movie => {
+                const posterUrl = movie.poster_path 
+                    ? `https://image.tmdb.org/t/p/w342${movie.poster_path}`
+                    : 'https://via.placeholder.com/342x513/1a1a1a/666666?text=No+Poster';
+                return `
+                    <div class="cursor-pointer group" onclick="window.location.href='/movie/${movie.movie_id}'">
+                        <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition group-hover:scale-105">
+                            <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy">
+                            <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition">
+                                <div class="absolute bottom-0 left-0 right-0 p-3">
+                                    <h3 class="font-bold text-sm">${movie.title}</h3>
+                                    ${movie.recommended_by ? `<p class="text-xs text-indigo-400">Liked by ${movie.recommended_by}</p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            document.getElementById('friend-recs-list').innerHTML = 
+                '<div class="text-gray-500 text-center py-8 col-span-full">Could not load recommendations. Please log in first.</div>';
+        }
+    }
+
+    // Create watch party
+    async function createWatchParty() {
+        const movieId = document.getElementById('wp-movie-id').value;
+        const time = document.getElementById('wp-time').value;
+        const msg = document.getElementById('wp-msg');
+        
+        if (!movieId || !time) {
+            msg.textContent = 'Please fill in movie ID and time';
+            msg.className = 'mt-2 text-sm text-red-400';
+            msg.classList.remove('hidden');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/social/watchparty/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ movie_id: parseInt(movieId), scheduled_time: time })
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                msg.textContent = data.error;
+                msg.className = 'mt-2 text-sm text-red-400';
+            } else {
+                msg.textContent = 'Watch party created!';
+                msg.className = 'mt-2 text-sm text-green-400';
+                loadWatchParties();
+            }
+            msg.classList.remove('hidden');
+        } catch (error) {
+            msg.textContent = 'Failed to create watch party';
+            msg.className = 'mt-2 text-sm text-red-400';
+            msg.classList.remove('hidden');
+        }
+    }
+
+    // Load watch parties
+    async function loadWatchParties() {
+        try {
+            const response = await fetch('/api/social/watchparty/upcoming');
+            const data = await response.json();
+            
+            const container = document.getElementById('watchparty-list');
+            const parties = data.parties || [];
+            
+            if (parties.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-8">No upcoming watch parties. Create one!</div>';
+                return;
+            }
+            
+            container.innerHTML = parties.map(p => {
+                const posterUrl = p.poster_path 
+                    ? `https://image.tmdb.org/t/p/w200${p.poster_path}` 
+                    : 'https://via.placeholder.com/200x300/1a1a1a/666666?text=Movie';
+                return `
+                    <div class="flex items-center gap-4 bg-gray-800 rounded-lg p-4">
+                        <img src="${posterUrl}" alt="${p.movie_title}" class="w-16 h-24 object-cover rounded">
+                        <div class="flex-1">
+                            <h4 class="font-semibold">${p.movie_title}</h4>
+                            <p class="text-sm text-gray-400">Hosted by ${p.host_name}</p>
+                            <p class="text-sm text-indigo-400">${new Date(p.scheduled_time).toLocaleString()}</p>
+                        </div>
+                        <span class="px-3 py-1 bg-purple-600/30 text-purple-300 rounded-full text-sm">${p.status}</span>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            document.getElementById('watchparty-list').innerHTML = 
+                '<div class="text-gray-500 text-center py-8">Could not load watch parties. Please log in first.</div>';
+        }
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+        loadFriends();
+        loadRequests();
+    });
+</script>
+{% endblock %}

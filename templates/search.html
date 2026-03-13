@@ -15,6 +15,35 @@
                 Describe the movie you're looking for - our AI understands stories, themes, and more
             </p>
             
+            <!-- Search Mode Toggle -->
+            <div class="flex justify-center mb-4 gap-2">
+                <button id="mode-story" onclick="setSearchMode('story')" class="px-4 py-2 rounded-lg text-sm font-semibold transition bg-indigo-600 text-white">
+                    🎬 Story Search
+                </button>
+                <button id="mode-visual" onclick="setSearchMode('visual')" class="px-4 py-2 rounded-lg text-sm font-semibold transition bg-gray-800 text-gray-400 hover:bg-gray-700">
+                    🖼️ Visual Search
+                </button>
+                <button id="mode-mood" onclick="setSearchMode('mood')" class="px-4 py-2 rounded-lg text-sm font-semibold transition bg-gray-800 text-gray-400 hover:bg-gray-700">
+                    😊 Mood Search
+                </button>
+            </div>
+
+            <!-- Image upload panel (visual mode only) -->
+            <div id="image-upload-panel" class="hidden mb-4">
+                <div class="flex items-center gap-4 bg-gray-900 border-2 border-dashed border-gray-600 rounded-2xl p-4 justify-center cursor-pointer hover:border-indigo-500 transition" onclick="document.getElementById('image-file-input').click()">
+                    <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                    <div>
+                        <p class="text-gray-300 font-medium">Upload a movie poster</p>
+                        <p class="text-gray-500 text-sm">Click to browse or drag &amp; drop an image</p>
+                    </div>
+                    <img id="image-preview" class="hidden w-16 h-24 object-cover rounded-lg ml-2" alt="preview">
+                </div>
+                <input type="file" id="image-file-input" accept="image/*" class="hidden">
+                <p class="text-gray-500 text-xs mt-2 text-center">Or describe the poster visually in the text box below</p>
+            </div>
+            
             <!-- Main Search Bar -->
             <div class="relative">
                 <textarea id="ai-search-input" 
@@ -88,7 +117,45 @@
 
 {% block scripts %}
 <script>
+    let searchMode = 'story';
+    let uploadedImageBase64 = null;
+    
+    function setSearchMode(mode) {
+        searchMode = mode;
+        uploadedImageBase64 = null;
+        const input = document.getElementById('ai-search-input');
+        const uploadPanel = document.getElementById('image-upload-panel');
+        document.querySelectorAll('[id^="mode-"]').forEach(btn => {
+            btn.className = 'px-4 py-2 rounded-lg text-sm font-semibold transition bg-gray-800 text-gray-400 hover:bg-gray-700';
+        });
+        document.getElementById('mode-' + mode).className = 'px-4 py-2 rounded-lg text-sm font-semibold transition bg-indigo-600 text-white';
+        
+        uploadPanel.classList.toggle('hidden', mode !== 'visual');
+        
+        if (mode === 'story') input.placeholder = "Describe what you're looking for... e.g., 'A mind-bending thriller about dreams within dreams'";
+        else if (mode === 'visual') input.placeholder = "Or describe the visual style... e.g., 'dark moody poster with a man in rain'";
+        else if (mode === 'mood') input.placeholder = "How are you feeling? e.g., 'happy', 'nostalgic', 'scared', 'adventurous', 'I want something exciting'";
+    }
+
+    // Image upload handler
     document.addEventListener('DOMContentLoaded', () => {
+        const fileInput = document.getElementById('image-file-input');
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    // Strip the data URL prefix (e.g. "data:image/jpeg;base64,")
+                    uploadedImageBase64 = ev.target.result.split(',')[1];
+                    const preview = document.getElementById('image-preview');
+                    preview.src = ev.target.result;
+                    preview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
         const searchInput = document.getElementById('ai-search-input');
         const searchButton = document.getElementById('search-button');
         const searchLoading = document.getElementById('search-loading');
@@ -96,7 +163,13 @@
         const resultsCount = document.getElementById('results-count');
         const searchResults = document.getElementById('search-results');
         const noResults = document.getElementById('no-results');
+        const noResultsMessage = document.querySelector('#no-results p');
         const searchInitial = document.getElementById('search-initial');
+
+        function showNoResults(message = 'Try adjusting your search or try one of the examples above') {
+            noResultsMessage.textContent = message;
+            noResults.classList.remove('hidden');
+        }
         
         // Search examples
         document.querySelectorAll('.search-example').forEach(button => {
@@ -120,8 +193,13 @@
         async function performSearch() {
             const query = searchInput.value.trim();
             
-            if (query.length < 3) {
+            // For visual mode with uploaded image, query can be empty
+            if (searchMode !== 'visual' && query.length < 3) {
                 alert('Please enter at least 3 characters');
+                return;
+            }
+            if (searchMode === 'visual' && !uploadedImageBase64 && query.length < 3) {
+                alert('Please upload an image or enter a visual description');
                 return;
             }
             
@@ -134,25 +212,52 @@
             searchResults.innerHTML = '';
             
             try {
-                const response = await fetch('/api/search/ai', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        query,
-                        limit: 30,
-                        include_tv: true
-                    })
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    displayResults(data.results, query);
+                let response;
+                if (searchMode === 'visual') {
+                    if (uploadedImageBase64) {
+                        // Use uploaded image (CLIP visual search)
+                        response = await fetch('/api/visual-search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image: uploadedImageBase64, top_k: 24 })
+                        });
+                    } else {
+                        // Use text description (CLIP text or semantic fallback)
+                        response = await fetch('/api/text-to-image-search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ description: query, top_k: 24 })
+                        });
+                    }
+                } else if (searchMode === 'mood') {
+                    response = await fetch('/api/mood-recommendations', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mood: query, limit: 24 })
+                    });
                 } else {
-                    throw new Error('Search failed');
+                    response = await fetch('/api/search/ai', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query, limit: 24, include_tv: true })
+                    });
+                }
+                
+                const data = await response.json();
+
+                if (response.ok) {
+                    const results = data.results || data.recommendations || data.movies || [];
+                    if (!results.length && data.message) {
+                        showNoResults(data.message);
+                        return;
+                    }
+                    displayResults(results, query || 'uploaded image');
+                } else {
+                    throw new Error(data.error || data.message || 'Search failed');
                 }
             } catch (error) {
                 console.error('Search error:', error);
-                noResults.classList.remove('hidden');
+                showNoResults(error.message || 'Search failed. Please try again.');
             } finally {
                 searchButton.classList.remove('hidden');
                 searchLoading.classList.add('hidden');
@@ -161,7 +266,7 @@
         
         function displayResults(results, query) {
             if (!results || results.length === 0) {
-                noResults.classList.remove('hidden');
+                showNoResults();
                 return;
             }
             

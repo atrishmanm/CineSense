@@ -27,8 +27,8 @@ def main():
     
     # Model arguments
     parser.add_argument('--model-type', type=str, default='hybrid',
-                       choices=['two_tower', 'hybrid'],
-                       help='Model type: two_tower (CF only) or hybrid (CF + Content)')
+                       choices=['two_tower', 'hybrid', 'deep_ncf', 'advanced_hybrid'],
+                       help='Model type: two_tower, hybrid, deep_ncf (RMSE<0.80), advanced_hybrid (RMSE<0.75)')
     parser.add_argument('--embedding-dim', type=int, default=128,
                        help='Embedding dimension')
     
@@ -100,30 +100,35 @@ def main():
     # Step 3: Train model
     logger.info("\n>>> STEP 3: MODEL TRAINING")
     
-    from ai.training_pipeline import train_netflix_model
-    
-    config = {
-        # Data
-        'batch_size': args.batch_size,
-        'use_implicit_feedback': args.implicit,
+    if args.model_type in ('deep_ncf', 'advanced_hybrid'):
+        # Use advanced training pipeline (focal loss, warmup, mixed precision)
+        from training.advanced_training import train_advanced_model
         
-        # Model
-        'model_type': args.model_type,
-        'embedding_dim': args.embedding_dim,
-        'hidden_dims': [256, 128, 64],
+        metrics = train_advanced_model(
+            model_type=args.model_type,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+            weight_decay=1e-5
+        )
+    else:
+        from ai.training_pipeline import train_netflix_model
         
-        # Training
-        'num_epochs': args.epochs,
-        'learning_rate': args.lr,
-        'weight_decay': 1e-5,
-        'scheduler': 'reduce_on_plateau',
-        'early_stopping_patience': 5,
+        config = {
+            'batch_size': args.batch_size,
+            'use_implicit_feedback': args.implicit,
+            'model_type': args.model_type,
+            'embedding_dim': args.embedding_dim,
+            'hidden_dims': [256, 128, 64],
+            'num_epochs': args.epochs,
+            'learning_rate': args.lr,
+            'weight_decay': 1e-5,
+            'scheduler': 'reduce_on_plateau',
+            'early_stopping_patience': 5,
+            'model_dir': 'ai/models'
+        }
         
-        # Paths
-        'model_dir': 'ai/models'
-    }
-    
-    pipeline, metrics = train_netflix_model(config)
+        pipeline, metrics = train_netflix_model(config)
     
     logger.info("\n" + "="*80)
     logger.info("✓ TRAINING COMPLETE!")

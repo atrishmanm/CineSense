@@ -25,7 +25,12 @@
 - **Reinforcement Learning** — UCB Multi-Armed Bandit for exploration vs exploitation
 - **55-Dimension Feature Vectors** — 20 genre + 10 director + 20 actor + 5 metadata features
 - **Advanced DBMS Features** — 16 normalized tables, 12 analytical views, 8 stored procedures, 4 custom functions, 5 automated triggers, 19+ indexes
-- **Cache Management** — Smart content caching with database-backed statistics
+- **Conversational AI** — DialoGPT-medium chatbot for natural language movie discovery
+- **Mood-Based Recommendations** — 7-emotion detection that maps mood to genres
+- **Social Features** — Friends, watch parties, and collaborative movie lists
+- **Visual Search** — Find movies by uploading poster images (CLIP)
+- **A/B Testing** — Statistical experiment framework for recommendation strategies
+- **Redis Caching** — 96% faster responses with TTL-based cache
 
 ## Setup
 
@@ -44,16 +49,25 @@ DB_NAME=cinesense
 TMDB_API_KEY=your_tmdb_api_key
 
 # Initialize database & train models
-mysql -u root -p < database/enhanced_schema.sql
+mysql -u root -p < database/schema.sql
 python database/run_migration.py
+python scripts/update_schema.py  # optional: adds social features tables
 python scripts/fetch_tmdb_data.py
 python run_pipeline.py
 
-# Run
-python app.py
+# Run (full-featured app)
+python app_integrated.py
 ```
 
 App runs at `http://localhost:5000`.
+
+| Page | URL |
+|------|-----|
+| Home | `http://localhost:5000/` |
+| Chat AI | `http://localhost:5000/chat-ui` |
+| Features | `http://localhost:5000/features` |
+| Social | `http://localhost:5000/friends` |
+| Compare | `http://localhost:5000/compare` |
 
 ## Documentation
 
@@ -63,6 +77,8 @@ See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for comprehensive detai
 - Module-wise file descriptions
 - API endpoints and frontend pages
 - Dataset information and deployment guide
+
+Database note: `database/schema.sql` is the single authoritative core schema file.
 
 ## References
 

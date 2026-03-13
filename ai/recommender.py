@@ -18,6 +18,7 @@ from tmdb.fetcher import TMDBFetcher
 from database.db_manager import db
 from config import Config
 import logging
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,17 +68,42 @@ class CineSenseRecommender:
         self.dl_scorer = None
         if Config.USE_DL_SCORING:
             try:
-                self.dl_scorer = _get_dl_scorer(
-                    v2_path=Config.DL_V2_CHECKPOINT,
-                    v1_path=Config.DL_V1_CHECKPOINT
-                )
-                if self.dl_scorer.is_loaded:
-                    logger.info("✅ DL ensemble scorer loaded (13-model NeuMF, RMSE=0.8932)")
-                else:
-                    logger.warning("DL scorer checkpoints not found — genre affinity disabled")
+                model_dir = Path(Config.MODEL_DIR)
+
+                def _resolve_checkpoint_path(raw_path: str) -> Path:
+                    candidate = Path(raw_path)
+                    search_paths = [
+                        candidate,
+                        Path.cwd() / candidate,
+                        model_dir / candidate.name,
+                    ]
+                    for path in search_paths:
+                        if path.exists():
+                            return path
+                    return model_dir / candidate.name
+
+                v2_checkpoint = _resolve_checkpoint_path(Config.DL_V2_CHECKPOINT)
+                v1_checkpoint = _resolve_checkpoint_path(Config.DL_V1_CHECKPOINT)
+
+                if not v2_checkpoint.exists() and not v1_checkpoint.exists():
+                    logger.info(
+                        "DL scorer disabled: checkpoints not found at %s or %s",
+                        v2_checkpoint,
+                        v1_checkpoint,
+                    )
                     self.dl_scorer = None
+                else:
+                    self.dl_scorer = _get_dl_scorer(
+                        v2_path=str(v2_checkpoint),
+                        v1_path=str(v1_checkpoint)
+                    )
+                    if self.dl_scorer.is_loaded:
+                        logger.info("DL ensemble scorer loaded (13-model NeuMF, RMSE=0.8932)")
+                    else:
+                        logger.warning("DL scorer checkpoint load incomplete - genre affinity disabled")
+                        self.dl_scorer = None
             except Exception as e:
-                logger.warning(f"DL scorer init failed: {e} — genre affinity disabled")
+                logger.warning(f"DL scorer init failed: {e} - genre affinity disabled")
                 self.dl_scorer = None
         
         # User-specific models

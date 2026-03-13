@@ -131,9 +131,14 @@
     <div class="bg-gray-800 rounded-lg p-6">
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-xl font-bold">Real-time Activity Log</h3>
-            <button id="clear-log-btn" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
-                Clear Log
-            </button>
+            <div class="flex gap-2">
+                <button id="toggle-monitoring-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm">
+                    Pause Monitoring
+                </button>
+                <button id="clear-log-btn" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
+                    Clear Log
+                </button>
+            </div>
         </div>
         
         <div id="activity-log" class="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-sm">
@@ -166,6 +171,15 @@ const CacheMonitorDashboard = {
         // Attach event listeners
         document.getElementById('clear-log-btn').addEventListener('click', () => {
             this.clearActivityLog();
+        });
+        
+        document.getElementById('toggle-monitoring-btn').addEventListener('click', () => {
+            this.toggleMonitoring();
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            this.stopMonitoring();
         });
     },
     
@@ -247,9 +261,15 @@ const CacheMonitorDashboard = {
     
     async updateDashboard() {
         try {
-            const monitor = await window.CineSense.API.monitorCache();
+            // Use correct endpoint - getCacheStats instead of monitorCache
+            const response = await window.CineSense.API.getCacheStats();
             
-            if (!monitor) return;
+            if (!response || !response.success) {
+                throw new Error(response?.error || 'Failed to fetch cache stats');
+            }
+            
+            // Transform response to expected format
+            const monitor = this.transformCacheStats(response);
             
             // Update status cards
             this.updateStatusCards(monitor);
@@ -262,8 +282,51 @@ const CacheMonitorDashboard = {
             
         } catch (error) {
             console.error('Error updating dashboard:', error);
-            this.logActivity('Error updating cache stats', 'error');
+            this.logActivity(`Error: ${error.message}`, 'error');
+            
+            // Don't crash - just show error state
+            this.showErrorState(error.message);
         }
+    },
+    
+    transformCacheStats(response) {
+        // Transform API response to dashboard format
+        const cacheManager = response.cache_manager || {};
+        const movieCache = cacheManager.movie_cache || { size: 0, max_size: 100, hit_rate: 0 };
+        const vectorCache = cacheManager.vector_cache || { size: 0, max_size: 500, hit_rate: 0 };
+        
+        return {
+            movie_cache: {
+                count: movieCache.size || 0,
+                max_size: movieCache.max_size || 100,
+                usage_percent: Math.round((movieCache.size || 0) / (movieCache.max_size || 100) * 100),
+                hit_rate: Math.round((movieCache.hit_rate || 0) * 100)
+            },
+            vector_cache: {
+                count: vectorCache.size || 0,
+                max_size: vectorCache.max_size || 500,
+                usage_percent: Math.round((vectorCache.size || 0) / (vectorCache.max_size || 500) * 100),
+                hit_rate: Math.round((vectorCache.hit_rate || 0) * 100)
+            },
+            status: {
+                health: this.calculateHealth(movieCache, vectorCache),
+                needs_refill: (movieCache.size || 0) < (movieCache.max_size || 100) * 0.3
+            }
+        };
+    },
+    
+    calculateHealth(movieCache, vectorCache) {
+        const avgHitRate = ((movieCache.hit_rate || 0) + (vectorCache.hit_rate || 0)) / 2;
+        if (avgHitRate > 0.6) return 'healthy';
+        if (avgHitRate > 0.3) return 'low_hit_rate';
+        return 'degraded';
+    },
+    
+    showErrorState(message) {
+        // Show error state without crashing
+        document.getElementById('cache-status-badge').textContent = 'Error';
+        document.getElementById('cache-status-badge').className = 'px-3 py-1 rounded-full text-sm bg-red-600';
+        document.getElementById('refill-status').textContent = message;
     },
     
     updateStatusCards(monitor) {
@@ -304,10 +367,12 @@ const CacheMonitorDashboard = {
     },
     
     updateCharts(monitor) {
-        // Update hit rate chart
+        // Update hit rate chart with memory limit
         const now = new Date().toLocaleTimeString();
         
-        if (this.hitRateChart.data.labels.length > 20) {
+        // Keep only last 15 data points to prevent memory leak
+        const MAX_DATA_POINTS = 15;
+        if (this.hitRateChart.data.labels.length >= MAX_DATA_POINTS) {
             this.hitRateChart.data.labels.shift();
             this.hitRateChart.data.datasets[0].data.shift();
             this.hitRateChart.data.datasets[1].data.shift();
@@ -316,16 +381,18 @@ const CacheMonitorDashboard = {
         this.hitRateChart.data.labels.push(now);
         this.hitRateChart.data.datasets[0].data.push(monitor.movie_cache.hit_rate);
         this.hitRateChart.data.datasets[1].data.push(monitor.vector_cache.hit_rate);
-        this.hitRateChart.update();
+        
+        // Use 'none' animation mode to reduce CPU usage
+        this.hitRateChart.update('none');
         
         // Update usage chart
         this.usageChart.data.datasets[0].data = [
             monitor.movie_cache.count,
-            monitor.movie_cache.max_size - monitor.movie_cache.count,
+            Math.max(0, monitor.movie_cache.max_size - monitor.movie_cache.count),
             monitor.vector_cache.count,
-            monitor.vector_cache.max_size - monitor.vector_cache.count
+            Math.max(0, monitor.vector_cache.max_size - monitor.vector_cache.count)
         ];
-        this.usageChart.update();
+        this.usageChart.update('none');
     },
     
     logActivity(message, type = 'info') {
@@ -371,12 +438,39 @@ const CacheMonitorDashboard = {
         // Initial update
         this.updateDashboard();
         
-        // Update every 5 seconds
-        setInterval(() => {
+        // Update every 30 seconds (reduced from 5 to prevent crash)
+        // Store interval ID so we can clear it if needed
+        this.monitoringInterval = setInterval(() => {
             this.updateDashboard();
-        }, 5000);
+        }, 30000);
         
-        this.logActivity('Cache monitoring started', 'info');
+        this.logActivity('Cache monitoring started (30s interval)', 'info');
+    },
+    
+    stopMonitoring() {
+        if (this.monitoringInterval) {
+            clearInterval(this.monitoringInterval);
+            this.monitoringInterval = null;
+            this.logActivity('Cache monitoring stopped', 'warning');
+        }
+    },
+    
+    toggleMonitoring() {
+        const button = document.getElementById('toggle-monitoring-btn');
+        
+        if (this.monitoringInterval) {
+            // Stop monitoring
+            this.stopMonitoring();
+            button.textContent = 'Resume Monitoring';
+            button.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            button.classList.add('bg-green-600', 'hover:bg-green-700');
+        } else {
+            // Start monitoring
+            this.startMonitoring();
+            button.textContent = 'Pause Monitoring';
+            button.classList.remove('bg-green-600', 'hover:bg-green-700');
+            button.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        }
     }
 };
 

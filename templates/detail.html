@@ -55,6 +55,12 @@
                             </svg>
                             Play
                         </a>
+                        <button id="watchlist-btn" onclick="toggleWatchlist()" class="px-5 py-2.5 bg-indigo-600/80 hover:bg-indigo-600 backdrop-blur-sm rounded font-semibold text-sm md:text-base transition flex items-center border border-indigo-500/50">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
+                            <span id="watchlist-text">Add to Watchlist</span>
+                        </button>
                         <button onclick="history.back()" class="px-5 py-2.5 bg-gray-600/80 hover:bg-gray-600 backdrop-blur-sm rounded font-semibold text-sm md:text-base transition flex items-center border border-gray-500/50">
                             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
@@ -122,6 +128,44 @@
                 <h2 class="text-2xl md:text-3xl font-bold mb-6">More Like This</h2>
                 <div id="similar-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4"></div>
             </div>
+
+            <!-- Reviews Section -->
+            <div id="reviews-section">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl md:text-3xl font-bold">Reviews</h2>
+                    <button onclick="toggleReviewForm()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-semibold transition">
+                        Write a Review
+                    </button>
+                </div>
+
+                <!-- Review Form (hidden by default) -->
+                <div id="review-form" class="hidden mb-8 bg-gray-900/50 rounded-xl p-6 border border-gray-800">
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-2">Rating</label>
+                        <div id="star-rating" class="flex gap-1">
+                            <button onclick="setRating(1)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
+                            <button onclick="setRating(2)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
+                            <button onclick="setRating(3)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
+                            <button onclick="setRating(4)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
+                            <button onclick="setRating(5)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-2">Title</label>
+                        <input id="review-title" type="text" maxlength="200" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-indigo-500 focus:outline-none" placeholder="Summarize your experience...">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-2">Your Review</label>
+                        <textarea id="review-body" rows="4" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-indigo-500 focus:outline-none resize-none" placeholder="What did you think of this movie?"></textarea>
+                    </div>
+                    <button onclick="submitReview()" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition">Submit Review</button>
+                </div>
+
+                <!-- Reviews List -->
+                <div id="reviews-list" class="space-y-4">
+                    <p class="text-gray-500">Loading reviews...</p>
+                </div>
+            </div>
             
         </div>
     </div>
@@ -136,7 +180,7 @@
     
     document.addEventListener('DOMContentLoaded', async () => {
         await loadMovieDetail();
-        await loadSimilarMovies();
+        await Promise.all([loadSimilarMovies(), loadReviews(), checkWatchlist()]);
     });
     
     async function loadMovieDetail() {
@@ -232,11 +276,10 @@
     
     async function loadSimilarMovies() {
         try {
-            const response = await fetch('/api/movie/top-rated?limit=12');
+            const response = await fetch(`/api/movie/${movieId}/similar?limit=12`);
             const data = await response.json();
             
             if (data.movies && data.movies.length > 0) {
-                // Filter out current movie
                 const similar = data.movies.filter(m => m.movie_id !== movieId);
                 document.getElementById('similar-container').innerHTML = 
                     similar.map(createStreamingCard).join('');
@@ -276,6 +319,129 @@
                 </div>
             </div>
         `;
+    }
+
+    // ===== WATCHLIST =====
+    let inWatchlist = false;
+
+    async function checkWatchlist() {
+        try {
+            const res = await fetch('/api/watchlist');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.watchlist && data.watchlist.some(w => w.movie_id === movieId)) {
+                inWatchlist = true;
+                document.getElementById('watchlist-text').textContent = 'In Watchlist ✓';
+                document.getElementById('watchlist-btn').classList.add('bg-green-600/80');
+                document.getElementById('watchlist-btn').classList.remove('bg-indigo-600/80');
+            }
+        } catch (e) { /* not logged in */ }
+    }
+
+    async function toggleWatchlist() {
+        try {
+            if (inWatchlist) {
+                await fetch(`/api/watchlist/${movieId}`, { method: 'DELETE' });
+                inWatchlist = false;
+                document.getElementById('watchlist-text').textContent = 'Add to Watchlist';
+                document.getElementById('watchlist-btn').classList.remove('bg-green-600/80');
+                document.getElementById('watchlist-btn').classList.add('bg-indigo-600/80');
+            } else {
+                const res = await fetch('/api/watchlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ movie_id: movieId })
+                });
+                if (res.ok) {
+                    inWatchlist = true;
+                    document.getElementById('watchlist-text').textContent = 'In Watchlist ✓';
+                    document.getElementById('watchlist-btn').classList.add('bg-green-600/80');
+                    document.getElementById('watchlist-btn').classList.remove('bg-indigo-600/80');
+                }
+            }
+        } catch (e) {
+            console.error('Watchlist error:', e);
+        }
+    }
+
+    // ===== REVIEWS =====
+    let selectedRating = 0;
+
+    function toggleReviewForm() {
+        document.getElementById('review-form').classList.toggle('hidden');
+    }
+
+    function setRating(n) {
+        selectedRating = n;
+        document.querySelectorAll('#star-rating .star').forEach((star, i) => {
+            star.classList.toggle('text-yellow-400', i < n);
+            star.classList.toggle('text-gray-600', i >= n);
+        });
+    }
+
+    async function loadReviews() {
+        try {
+            const res = await fetch(`/api/reviews/${movieId}`);
+            const data = await res.json();
+            const list = document.getElementById('reviews-list');
+
+            if (!data.reviews || data.reviews.length === 0) {
+                list.innerHTML = '<p class="text-gray-500">No reviews yet. Be the first!</p>';
+                return;
+            }
+
+            list.innerHTML = data.reviews.map(r => `
+                <div class="bg-gray-900/50 rounded-xl p-5 border border-gray-800">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-3">
+                            <span class="text-yellow-400 font-bold">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+                            <span class="text-white font-semibold">${r.username || 'Anonymous'}</span>
+                        </div>
+                        <span class="text-xs text-gray-500">${new Date(r.created_at).toLocaleDateString()}</span>
+                    </div>
+                    ${r.review_title ? `<h4 class="font-semibold text-white mb-1">${r.review_title}</h4>` : ''}
+                    ${r.review_text ? `<p class="text-gray-300 text-sm">${r.review_text}</p>` : ''}
+                    <button onclick="markHelpful(${r.review_id})" class="mt-2 text-xs text-gray-500 hover:text-indigo-400 transition">
+                        👍 Helpful (${r.helpful_count || 0})
+                    </button>
+                </div>
+            `).join('');
+        } catch (e) {
+            document.getElementById('reviews-list').innerHTML = '<p class="text-gray-500">No reviews yet. Be the first!</p>';
+        }
+    }
+
+    async function submitReview() {
+        if (!selectedRating) { alert('Please select a rating'); return; }
+        try {
+            const res = await fetch('/api/reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    movie_id: movieId,
+                    rating: selectedRating,
+                    review_title: document.getElementById('review-title').value,
+                    review_text: document.getElementById('review-body').value
+                })
+            });
+            if (res.ok) {
+                document.getElementById('review-form').classList.add('hidden');
+                document.getElementById('review-title').value = '';
+                document.getElementById('review-body').value = '';
+                selectedRating = 0;
+                setRating(0);
+                await loadReviews();
+            }
+        } catch (e) {
+            console.error('Review submit error:', e);
+        }
+    }
+
+    async function markHelpful(reviewId) {
+        try {
+            await fetch(`/api/reviews/${reviewId}/helpful`, { method: 'POST' });
+            await loadReviews();
+        } catch (e) { console.error(e); }
     }
 </script>
 {% endblock %}

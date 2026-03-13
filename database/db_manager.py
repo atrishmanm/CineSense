@@ -639,6 +639,278 @@ class DatabaseManager:
         with self.get_cursor() as cursor:
             cursor.execute(query, (limit,))
             return cursor.fetchall()
+    
+    # ========================================================================
+    # WATCHLIST OPERATIONS
+    # ========================================================================
+    
+    def add_to_watchlist(self, user_id, movie_id, priority=5, status='planned', note=None):
+        """Add movie to user's watchlist"""
+        query = """
+            INSERT INTO watchlist (user_id, movie_id, priority, status, personal_note)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE priority = VALUES(priority), status = VALUES(status), personal_note = VALUES(personal_note)
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id, movie_id, priority, status, note))
+            return cursor.lastrowid
+    
+    def get_user_watchlist(self, user_id, status=None, limit=50):
+        """Get user's watchlist from the watchlist_details view"""
+        if status:
+            query = "SELECT * FROM watchlist_details WHERE user_id = %s AND status = %s ORDER BY priority DESC, added_at DESC LIMIT %s"
+            params = (user_id, status, limit)
+        else:
+            query = "SELECT * FROM watchlist_details WHERE user_id = %s ORDER BY priority DESC, added_at DESC LIMIT %s"
+            params = (user_id, limit)
+        with self.get_cursor() as cursor:
+            cursor.execute(query, params)
+            return cursor.fetchall()
+    
+    def update_watchlist_status(self, user_id, movie_id, status, rating=None):
+        """Update watchlist entry status"""
+        if status == 'completed':
+            query = "UPDATE watchlist SET status = %s, user_rating = %s, watched_at = CURRENT_TIMESTAMP WHERE user_id = %s AND movie_id = %s"
+            params = (status, rating, user_id, movie_id)
+        else:
+            query = "UPDATE watchlist SET status = %s WHERE user_id = %s AND movie_id = %s"
+            params = (status, user_id, movie_id)
+        with self.get_cursor() as cursor:
+            cursor.execute(query, params)
+            return cursor.rowcount
+    
+    def remove_from_watchlist(self, user_id, movie_id):
+        """Remove movie from user's watchlist"""
+        query = "DELETE FROM watchlist WHERE user_id = %s AND movie_id = %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id, movie_id))
+            return cursor.rowcount
+    
+    # ========================================================================
+    # REVIEW OPERATIONS
+    # ========================================================================
+    
+    def add_review(self, user_id, movie_id, rating, review_text=None, is_spoiler=False):
+        """Add or update a movie review"""
+        query = """
+            INSERT INTO movie_reviews (user_id, movie_id, rating, review_text, is_spoiler)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE rating = VALUES(rating), review_text = VALUES(review_text), is_spoiler = VALUES(is_spoiler)
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id, movie_id, rating, review_text, is_spoiler))
+            return cursor.lastrowid
+    
+    def get_movie_reviews(self, movie_id, limit=20):
+        """Get reviews for a movie"""
+        query = """
+            SELECT r.*, u.username FROM movie_reviews r
+            INNER JOIN users u ON r.user_id = u.user_id
+            WHERE r.movie_id = %s ORDER BY r.created_at DESC LIMIT %s
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (movie_id, limit))
+            return cursor.fetchall()
+    
+    def get_user_reviews(self, user_id, limit=50):
+        """Get all reviews by a user"""
+        query = """
+            SELECT r.*, m.title, m.poster_path FROM movie_reviews r
+            INNER JOIN movies m ON r.movie_id = m.movie_id
+            WHERE r.user_id = %s ORDER BY r.created_at DESC LIMIT %s
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id, limit))
+            return cursor.fetchall()
+    
+    def get_user_review_summary(self, user_id):
+        """Get user review statistics from the user_review_summary view"""
+        query = "SELECT * FROM user_review_summary WHERE user_id = %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id,))
+            return cursor.fetchone()
+    
+    def vote_review_helpful(self, review_id):
+        """Increment helpful vote count for a review"""
+        query = "UPDATE movie_reviews SET helpful_votes = helpful_votes + 1 WHERE review_id = %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (review_id,))
+            return cursor.rowcount
+    
+    # ========================================================================
+    # ADVANCED ANALYTICS (using stored functions)  
+    # ========================================================================
+    
+    def get_movie_popularity_tier(self, movie_id):
+        """Get movie popularity tier using stored function"""
+        query = "SELECT get_popularity_tier(popularity) AS tier FROM movies WHERE movie_id = %s"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (movie_id,))
+            result = cursor.fetchone()
+            return result['tier'] if result else 'Unknown'
+    
+    def get_genre_similarity(self, movie_a_id, movie_b_id):
+        """Get Jaccard genre similarity between two movies"""
+        query = "SELECT jaccard_genre_similarity(%s, %s) AS similarity"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (movie_a_id, movie_b_id))
+            result = cursor.fetchone()
+            return float(result['similarity']) if result else 0.0
+    
+    def get_user_taste_profile(self, user_id):
+        """Get user taste profile label using stored function"""
+        query = "SELECT get_user_taste_profile(%s) AS profile"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id,))
+            result = cursor.fetchone()
+            return result['profile'] if result else 'New Explorer'
+    
+    def get_weighted_score(self, user_id, movie_id):
+        """Get weighted recommendation score for a user-movie pair"""
+        query = "SELECT weighted_recommendation_score(%s, %s) AS score"
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (user_id, movie_id))
+            result = cursor.fetchone()
+            return float(result['score']) if result else 0.0
+    
+    def get_genre_comparison_stats(self):
+        """Get genre win/loss statistics from view"""
+        query = "SELECT * FROM genre_comparison_stats ORDER BY win_rate_pct DESC"
+        with self.get_cursor() as cursor:
+            cursor.execute(query)
+            return cursor.fetchall()
+    
+    def run_genre_audit(self):
+        """Run genre audit report using cursor-based stored procedure"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.callproc('generate_genre_audit')
+                results = []
+                for result in cursor.stored_results():
+                    results = result.fetchall()
+                connection.commit()
+                cursor.close()
+                return results
+        except Exception as e:
+            logger.error(f"Genre audit error: {e}")
+            return []
+    
+    # ========================================================================
+    # GENERIC QUERY/EXECUTE (used by social_routes and other modules)
+    # ========================================================================
+    
+    def query(self, sql, params=None, fetch_all=True):
+        """Execute a SELECT query and return results"""
+        with self.get_cursor() as cursor:
+            cursor.execute(sql, params or ())
+            if fetch_all:
+                return cursor.fetchall()
+            return cursor.fetchone()
+    
+    def execute(self, sql, params=None, return_lastrowid=False):
+        """Execute an INSERT/UPDATE/DELETE query"""
+        with self.get_cursor() as cursor:
+            cursor.execute(sql, params or ())
+            if return_lastrowid:
+                return cursor.lastrowid
+            return cursor.rowcount
+    
+    def ensure_social_tables(self):
+        """Create social feature tables if they don't exist"""
+        tables = [
+            """
+            CREATE TABLE IF NOT EXISTS friend_requests (
+                request_id INT AUTO_INCREMENT PRIMARY KEY,
+                from_user_id INT NOT NULL,
+                to_user_id INT NOT NULL,
+                status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (from_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                FOREIGN KEY (to_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                UNIQUE KEY unique_request (from_user_id, to_user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS friendships (
+                friendship_id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id_1 INT NOT NULL,
+                user_id_2 INT NOT NULL,
+                status ENUM('accepted', 'blocked') DEFAULT 'accepted',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id_1) REFERENCES users(user_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id_2) REFERENCES users(user_id) ON DELETE CASCADE,
+                UNIQUE KEY unique_friendship (user_id_1, user_id_2)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS watch_parties (
+                party_id INT AUTO_INCREMENT PRIMARY KEY,
+                host_id INT NOT NULL,
+                movie_id INT NOT NULL,
+                scheduled_time DATETIME NOT NULL,
+                status ENUM('pending', 'active', 'completed', 'cancelled') DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (host_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS watch_party_invites (
+                invite_id INT AUTO_INCREMENT PRIMARY KEY,
+                party_id INT NOT NULL,
+                user_id INT NOT NULL,
+                status ENUM('pending', 'accepted', 'declined') DEFAULT 'pending',
+                invited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (party_id) REFERENCES watch_parties(party_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                UNIQUE KEY unique_invite (party_id, user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS collaborative_lists (
+                list_id INT AUTO_INCREMENT PRIMARY KEY,
+                creator_id INT NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                is_public BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (creator_id) REFERENCES users(user_id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS collaborative_list_items (
+                item_id INT AUTO_INCREMENT PRIMARY KEY,
+                list_id INT NOT NULL,
+                movie_id INT NOT NULL,
+                added_by INT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (list_id) REFERENCES collaborative_lists(list_id) ON DELETE CASCADE,
+                FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE,
+                FOREIGN KEY (added_by) REFERENCES users(user_id) ON DELETE CASCADE,
+                UNIQUE KEY unique_list_movie (list_id, movie_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS collaborative_list_members (
+                member_id INT AUTO_INCREMENT PRIMARY KEY,
+                list_id INT NOT NULL,
+                user_id INT NOT NULL,
+                role ENUM('owner', 'editor', 'viewer') DEFAULT 'editor',
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (list_id) REFERENCES collaborative_lists(list_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                UNIQUE KEY unique_list_member (list_id, user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        ]
+        
+        with self.get_cursor() as cursor:
+            for table_sql in tables:
+                try:
+                    cursor.execute(table_sql)
+                except Exception as e:
+                    logger.warning(f"Table creation warning: {e}")
 
 
 # Singleton instance

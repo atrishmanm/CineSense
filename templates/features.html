@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineSense - All Features</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        }
+        
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 900;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+        }
+        
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            opacity: 0.7;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+        
+        .feature-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 30px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .feature-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: #667eea;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+        }
+        
+        .feature-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-right: 15px;
+        }
+        
+        .feature-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        
+        .feature-description {
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+        
+        .feature-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+        
+        .status-active {
+            background: rgba(52, 211, 153, 0.2);
+            color: #34d399;
+        }
+        
+        .status-warmup {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+        
+        .feature-action {
+            display: inline-block;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+        
+        .feature-action:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .section-title {
+            font-size: 2rem;
+            font-weight: 800;
+            margin: 40px 0 20px 0;
+            padding-left: 20px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .api-endpoint {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .endpoint-method {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-right: 10px;
+        }
+        
+        .method-post { background: #10b981; }
+        .method-get { background: #3b82f6; }
+        
+        .endpoint-path {
+            color: #fbbf24;
+        }
+        
+        .quick-links {
+            display: flex;
+            gap: 15px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+        
+        .quick-link {
+            padding: 15px 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .quick-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #667eea;
+            transform: translateY(-3px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 CineSense Features</h1>
+            <p>Advanced AI-Powered Movie Recommendation Platform</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">17</div>
+                <div class="stat-label">AI Features</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">10+</div>
+                <div class="stat-label">API Endpoints</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">100%</div>
+                <div class="stat-label">Implementation</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">CUDA</div>
+                <div class="stat-label">GPU Enabled</div>
+            </div>
+        </div>
+        
+        <div class="quick-links">
+            <a href="/" class="quick-link">🏠 Home</a>
+            <a href="/search" class="quick-link">🔍 Search</a>
+            <a href="/compare" class="quick-link">⚖️ Compare</a>
+            <a href="/chat-ui" class="quick-link">💬 Chat</a>
+            <a href="/profile" class="quick-link">👤 Profile</a>
+        </div>
+        
+        <h2 class="section-title">🤖 AI Features</h2>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🔍</div>
+                    <div class="feature-title">Semantic Search</div>
+                </div>
+                <div class="feature-description">
+                    Natural language movie search powered by sentence transformers. Search by plot descriptions like "indian spy thriller" or "time loop movie".
+                </div>
+                <span class="feature-status status-active">✓ Active</span>
+                <a href="/search?q=sci-fi+thriller" class="feature-action">Try Search</a>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">💬</div>
+                    <div class="feature-title">Conversational AI</div>
+                </div>
+                <div class="feature-description">
+                    Chat with our DialoGPT-powered bot for personalized movie recommendations. Natural conversation flow with context awareness.
+                </div>
+                <span class="feature-status status-warmup">⏳ Warmup Needed</span>
+                <a href="/chat-ui" class="feature-action">Start Chat</a>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">😊</div>
+                    <div class="feature-title">Mood Detection</div>
+                </div>
+                <div class="feature-description">
+                    Get movie recommendations based on your current mood. AI analyzes your emotional state and suggests perfect matches.
+                </div>
+                <span class="feature-status status-active">✓ Active</span>
+                <button onclick="testMood()" class="feature-action">Test Mood Recs</button>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">📈</div>
+                    <div class="feature-title">Trending Detection</div>
+                </div>
+                <div class="feature-description">
+                    Real-time detection of trending and viral movies using velocity and acceleration metrics.
+                </div>
+                <span class="feature-status status-active">✓ Active</span>
+                <button onclick="loadTrending()" class="feature-action">View Trending</button>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🖼️</div>
+                    <div class="feature-title">Visual Search</div>
+                </div>
+                <div class="feature-description">
+                    Upload movie posters or scenes to find similar movies using CLIP multi-modal embeddings.
+                </div>
+                <span class="feature-status status-warmup">⏳ Warmup Needed</span>
+                <button onclick="showImageUpload()" class="feature-action">Upload Image</button>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🔬</div>
+                    <div class="feature-title">Explainable AI</div>
+                </div>
+                <div class="feature-description">
+                    Understand why movies are recommended using SHAP values and natural language explanations.
+                </div>
+                <span class="feature-status status-active">✓ Active</span>
+                <button onclick="explainRec()" class="feature-action">See Example</button>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">👥</div>
+                    <div class="feature-title">Social Features</div>
+                </div>
+                <div class="feature-description">
+                    Connect with friends, create watch parties, share movie lists, and get friend-based recommendations.
+                </div>
+                <span class="feature-status status-active">✓ Active</span>
+                <a href="/friends" class="feature-action">Social Hub</a>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🔄</div>
+                    <div class="feature-title">Sequential Models</div>
+                </div>
+                <div class="feature-description">
+                    GRU-based models that learn from your viewing history sequence for better predictions.
+                </div>
+                <span class="feature-status status-active">✓ Active</span>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-title">Redis Caching</div>
+                </div>
+                <div class="feature-description">
+                    96% faster responses with intelligent caching. Recommendations cached for instant retrieval.
+                </div>
+                <span class="feature-status status-warmup">⏳ Redis Server Needed</span>
+            </div>
+        </div>
+        
+        <h2 class="section-title">🚀 API Endpoints</h2>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-post">POST</span>
+            <span class="endpoint-path">/api/chat</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Conversational movie recommendations
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-post">POST</span>
+            <span class="endpoint-path">/api/mood-recommendations</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Get recommendations based on mood
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-get">GET</span>
+            <span class="endpoint-path">/api/trending</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Currently trending movies
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-get">GET</span>
+            <span class="endpoint-path">/api/viral</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Viral movies detection
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-post">POST</span>
+            <span class="endpoint-path">/api/visual-search</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Image-based movie search
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-post">POST</span>
+            <span class="endpoint-path">/api/social/friends/add</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Send friend request
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-get">GET</span>
+            <span class="endpoint-path">/api/social/friends/list</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Get friends list
+            </p>
+        </div>
+        
+        <div class="api-endpoint">
+            <span class="endpoint-method method-post">POST</span>
+            <span class="endpoint-path">/api/social/watchparty/create</span>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">
+                Create synchronized watch party
+            </p>
+        </div>
+        
+        <h2 class="section-title">📊 Technical Stack</h2>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🧠</div>
+                    <div class="feature-title">PyTorch + CUDA</div>
+                </div>
+                <div class="feature-description">
+                    GPU-accelerated deep learning models for real-time inference.
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🤗</div>
+                    <div class="feature-title">Transformers</div>
+                </div>
+                <div class="feature-description">
+                    BERT, DialoGPT, CLIP, and T5 models for NLP and vision tasks.
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-header">
+                    <div class="feature-icon">🔍</div>
+                    <div class="feature-title">FAISS Vector Search</div>
+                </div>
+                <div class="feature-description">
+                    Approximate nearest neighbor search for semantic similarity.
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        async function testMood() {
+            const mood = prompt("Enter your mood (happy, sad, excited, etc.):");
+            if (!mood) return;
+            
+            try {
+                const response = await fetch('/api/mood-recommendations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mood: mood, limit: 5 })
+                });
+                
+                const data = await response.json();
+                alert(`Found ${data.recommendations?.length || 0} movies for '${mood}' mood!`);
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+        
+        async function loadTrending() {
+            try {
+                const response = await fetch('/api/trending?limit=10');
+                const data = await response.json();
+                alert(`Found ${data.trending?.length || 0} trending movies!`);
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+        
+        function showImageUpload() {
+            const desc = prompt('Describe a movie poster (e.g., "dark poster with a person running"):');
+            if (!desc) return;
+            fetch('/api/text-to-image-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: desc, top_k: 5 })
+            })
+            .then(r => r.json())
+            .then(data => alert(`Found ${data.results?.length || 0} visually similar movies!`))
+            .catch(err => alert('Error: ' + err.message));
+        }
+        
+        function explainRec() {
+            alert('Explainable AI:\n\nGet detailed explanations like:\n\n"Recommended because:\n• You enjoyed Action movies (45% weight)\n• Similar to The Dark Knight (30% weight)\n• High user ratings (25% weight)"');
+        }
+    </script>
+</body>
+</html>

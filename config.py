@@ -22,6 +22,12 @@ class Config:
         'collation': 'utf8mb4_unicode_ci'
     }
     
+    # Redis Configuration (for caching)
+    REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+    REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+    REDIS_DB = int(os.getenv('REDIS_DB', 0))
+    REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', None)
+    
     # TMDB API
     TMDB_API_KEY = os.getenv('TMDB_API_KEY', '')
     TMDB_BASE_URL = os.getenv('TMDB_BASE_URL', 'https://api.themoviedb.org/3')
@@ -46,6 +52,10 @@ class Config:
     # Memory & Temporal Decay
     TEMPORAL_DECAY_FACTOR = 0.7  # Weight for recent interactions (0.7 recent + 0.3 past)
     INTERACTION_MEMORY_WINDOW = 50  # Keep last N interactions with full weight
+    
+    # Model Paths
+    MODEL_DIR = os.getenv('MODEL_DIR', './model')
+    CHECKPOINT_DIR = os.getenv('CHECKPOINT_DIR', './checkpoints')
     
     # Probabilistic Decision Making
     USE_SOFTMAX_SELECTION = True  # Use probability distributions instead of argmax
@@ -97,8 +107,9 @@ class Config:
     FINAL_RECOMMENDATION_COUNT = 20  # Return top 20 after ranking candidates
 
     # Deep Learning Ensemble (NeuMF V2)
-    USE_DL_SCORING = True  # Enable learned genre affinity from NeuMF ensemble
+    # Disabled by default unless checkpoints are explicitly provisioned.
+    USE_DL_SCORING = os.getenv('USE_DL_SCORING', '0').lower() in {'1', 'true', 'yes', 'on'}
     DL_SCORE_WEIGHT = 0.15  # Weight of DL genre affinity in final score
-    DL_V2_CHECKPOINT = 'cinesense_v2.pt'  # Phase 2 ensemble (8 models)
-    DL_V1_CHECKPOINT = 'cinesense_model_final.pt'  # Phase 1 ensemble (5 models)
+    DL_V2_CHECKPOINT = os.getenv('DL_V2_CHECKPOINT', 'cinesense_v2.pt')  # Phase 2 ensemble (8 models)
+    DL_V1_CHECKPOINT = os.getenv('DL_V1_CHECKPOINT', 'cinesense_model_final.pt')  # Phase 1 ensemble (5 models)
     DL_ENSEMBLE_RMSE = 0.8932  # Best: Mega optimized

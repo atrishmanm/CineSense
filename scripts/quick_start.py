@@ -5,8 +5,17 @@ This script helps you get started with training the model.
 """
 
 import sys
+import os
 import logging
 from pathlib import Path
+
+# Ensure working directory is project root
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+os.chdir(PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+TRAIN_SCRIPT = os.path.join('scripts', 'train_model.py')
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -101,7 +110,7 @@ def quick_test():
     import subprocess
     
     cmd = [
-        sys.executable, 'train_model.py',
+        sys.executable, TRAIN_SCRIPT,
         '--sample',
         '--epochs', '5',
         '--batch-size', '512'
@@ -124,7 +133,7 @@ def full_training():
     import subprocess
     
     cmd = [
-        sys.executable, 'train_model.py',
+        sys.executable, TRAIN_SCRIPT,
         '--epochs', '20',
         '--batch-size', '1024'
     ]
@@ -139,7 +148,7 @@ def preprocess_only():
     import subprocess
     
     cmd = [
-        sys.executable, 'train_model.py',
+        sys.executable, TRAIN_SCRIPT,
         '--preprocess-only'
     ]
     
