@@ -427,7 +427,20 @@ def create_app():
             except Exception as e:
                 logger.warning(f"Semantic search in chat failed: {e}")
 
-        # --- 6. Keyword fallback ---
+        # --- 6. Internet (TMDB) fallback — fetch from the web when local results are empty ---
+        try:
+            from ai.content_pipeline import pipeline
+            movies = pipeline.fetch_on_demand(search_query=message)
+            if movies:
+                return jsonify({
+                    'response': _generate_chat_response(message, movies),
+                    'recommendations': movies,
+                    'type': 'internet'
+                })
+        except Exception as e:
+            logger.warning(f"Internet search in chat failed: {e}")
+
+        # --- 7. Keyword fallback ---
         return jsonify(_fallback_chat(message, db_manager))
     
     @app.route('/api/mood-recommendations', methods=['POST'])
@@ -480,6 +493,20 @@ def create_app():
             
             # Fallback: get popular movies from DB as "trending"
             movies = db_manager.get_top_movies(limit=limit, order_by='popularity')
+
+            # If local database has few entries, supplement with TMDB live data
+            if len(movies) < limit:
+                try:
+                    from tmdb.fetcher import TMDBFetcher
+                    from ai.content_pipeline import pipeline
+                    fetcher = TMDBFetcher()
+                    data = fetcher.get_now_playing(page=1)
+                    if data and 'results' in data:
+                        pipeline._process_and_store_movies(data['results'])
+                        movies = db_manager.get_top_movies(limit=limit, order_by='popularity')
+                except Exception as tmdb_err:
+                    logger.warning(f"TMDB trending supplement failed: {tmdb_err}")
+
             return jsonify({'trending': movies})
         except Exception as e:
             logger.error(f"Trending error: {e}")

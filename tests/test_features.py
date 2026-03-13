@@ -111,6 +111,24 @@ def test_social_endpoints():
         except Exception as e:
             print_result(f"Social: {endpoint}", False, str(e))
 
+def test_internet_search():
+    """Test internet (TMDB) search endpoint"""
+    print("\n🌐 Testing Internet Search...")
+    try:
+        response = requests.get(
+            f"{BASE_URL}/api/internet/search?q=inception",
+            timeout=30
+        )
+        if response.status_code == 200:
+            data = response.json()
+            count = len(data.get('results', []))
+            source = data.get('source', '')
+            print_result("Internet Search", True, f"Found {count} results from '{source}'")
+        else:
+            print_result("Internet Search", False, f"Status: {response.status_code}")
+    except Exception as e:
+        print_result("Internet Search", False, str(e))
+
 def test_core_routes():
     """Test core application routes"""
     print("\n🎬 Testing Core Routes...")
@@ -154,6 +172,8 @@ def main():
     test_viral()
     sleep(2)
     test_social_endpoints()
+    sleep(2)
+    test_internet_search()
     
     print("\n" + "=" * 70)
     print("✨ Testing Complete!")

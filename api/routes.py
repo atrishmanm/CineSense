@@ -1220,6 +1220,36 @@ def test_tmdb():
         }), 500
 
 
+@api.route('/internet/search', methods=['GET'])
+def internet_search():
+    """
+    Search for movies directly from the internet (TMDB API).
+    Fetches live results, stores them in the local database, and returns them.
+    """
+    try:
+        query = request.args.get('q', '').strip()
+        limit = request.args.get('limit', 20, type=int)
+
+        if not query:
+            return jsonify({'error': 'Search query required'}), 400
+
+        from ai.content_pipeline import pipeline
+        movies = pipeline.fetch_on_demand(search_query=query)
+        limited = movies[:limit]
+
+        return jsonify({
+            'query': query,
+            'results': limited,
+            'count': len(limited),
+            'source': 'internet',
+            'success': True
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Internet search error: {e}")
+        return jsonify({'error': 'Internet search failed', 'success': False}), 500
+
+
 @api.route('/cache/monitor', methods=['GET'])
 def monitor_cache():
     """Real-time cache monitoring with detailed metrics"""
