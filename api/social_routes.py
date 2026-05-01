@@ -51,11 +51,24 @@ def add_friend():
         
         if existing:
             return jsonify({'error': 'Friendship already exists'}), 400
+
+        # Check if a request already exists in either direction
+        pending = db.query("""
+            SELECT * FROM friend_requests
+            WHERE (from_user_id = %s AND to_user_id = %s AND status = 'pending')
+               OR (from_user_id = %s AND to_user_id = %s AND status = 'pending')
+        """, (user_id, friend_id, friend_id, user_id))
+
+        if pending:
+            if pending[0]['from_user_id'] == friend_id:
+                return jsonify({'error': 'This user already sent you a request. Check Requests tab.'}), 400
+            return jsonify({'error': 'Friend request already sent'}), 400
         
-        # Create friend request
+        # Create friend request with duplicate key handling
         db.execute("""
             INSERT INTO friend_requests (from_user_id, to_user_id, status, created_at)
             VALUES (%s, %s, 'pending', NOW())
+            ON DUPLICATE KEY UPDATE status = 'pending', created_at = NOW()
         """, (user_id, friend_id))
         
         return jsonify({
@@ -138,6 +151,40 @@ def accept_friend_request():
     except Exception as e:
         logger.error(f"Error accepting friend request: {e}")
         return jsonify({'error': 'Failed to accept request'}), 500
+
+
+@social_bp.route('/friends/remove', methods=['POST'])
+def remove_friend():
+    """Remove a friend relationship"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.json
+    friend_id = data.get('friend_id')
+    user_id = session['user_id']
+    
+    if not friend_id:
+        return jsonify({'error': 'friend_id required'}), 400
+        
+    try:
+        # Remove from friendships
+        db.execute("""
+            DELETE FROM friendships 
+            WHERE (user_id_1 = %s AND user_id_2 = %s)
+               OR (user_id_1 = %s AND user_id_2 = %s)
+        """, (user_id, friend_id, friend_id, user_id))
+        
+        # Also remove any requests to allow clean re-requesting later
+        db.execute("""
+            DELETE FROM friend_requests
+            WHERE (from_user_id = %s AND to_user_id = %s)
+               OR (from_user_id = %s AND to_user_id = %s)
+        """, (user_id, friend_id, friend_id, user_id))
+        
+        return jsonify({'message': 'Friend removed successfully'}), 200
+    except Exception as e:
+        logger.error(f"Error removing friend: {e}")
+        return jsonify({'error': 'Failed to remove friend'}), 500
 
 
 @social_bp.route('/friends/list', methods=['GET'])
@@ -406,7 +453,7 @@ def create_collaborative_list():
             return jsonify({'error': 'List name required'}), 400
         
         list_id = db.execute("""
-            INSERT INTO movie_lists (creator_id, name, description, is_public, created_at)
+            INSERT INTO collaborative_lists (creator_id, name, description, is_public, created_at)
             VALUES (%s, %s, %s, %s, NOW())
         """, (user_id, list_name, description, is_public), return_lastrowid=True)
         
@@ -427,16 +474,22 @@ def add_movie_to_list(list_id):
         return jsonify({'error': 'Not authenticated'}), 401
     
     try:
+        user_id = session['user_id']
         data = request.json
         movie_id = data.get('movie_id')
+        notes = data.get('notes')
+        position = data.get('position', 0)
         
         if not movie_id:
             return jsonify({'error': 'movie_id required'}), 400
         
         db.execute("""
-            INSERT INTO list_movies (list_id, movie_id, added_at)
-            VALUES (%s, %s, NOW())
-        """, (list_id, movie_id))
+            INSERT INTO collaborative_list_items (list_id, movie_id, added_by, added_at)
+            VALUES (%s, %s, %s, NOW())
+            ON DUPLICATE KEY UPDATE
+                added_by = VALUES(added_by),
+                added_at = NOW()
+        """, (list_id, movie_id, user_id))
         
         return jsonify({'message': 'Movie added to list'}), 200
     

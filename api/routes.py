@@ -4,7 +4,10 @@ RESTful API endpoints for the CineSense application
 """
 
 from flask import Blueprint, request, jsonify, session, current_app
+import csv
+from pathlib import Path
 from database.db_manager import db
+from config import Config
 from ai.recommender import recommender
 from ai.cache_manager import cache_manager
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -15,10 +18,79 @@ logger = logging.getLogger(__name__)
 
 api = Blueprint('api', __name__, url_prefix='/api')
 
+TMDB_GENRE_CACHE = {}
+TMDB_CSV_PATH = Path(__file__).resolve().parent.parent / 'data' / 'tmdb' / 'TMDB_movie_dataset_v11.csv'
+
 
 def get_semantic_search():
     """Return the pre-initialized semantic search engine from app startup"""
     return getattr(current_app, 'semantic_search', None)
+
+
+def _parse_genre_string(genre_str):
+    if not genre_str:
+        return []
+    return [g.strip() for g in genre_str.split(',') if g.strip()]
+
+
+def _load_tmdb_genres_for_ids(tmdb_ids):
+    missing = [int(t) for t in tmdb_ids if t and int(t) not in TMDB_GENRE_CACHE]
+    if not missing:
+        return
+    if not TMDB_CSV_PATH.exists():
+        for tmdb_id in missing:
+            TMDB_GENRE_CACHE[tmdb_id] = []
+        return
+
+    missing_set = set(str(t) for t in missing)
+    with TMDB_CSV_PATH.open('r', encoding='utf-8', newline='') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            row_id = row.get('id')
+            if row_id in missing_set:
+                genres = _parse_genre_string(row.get('genres'))
+                TMDB_GENRE_CACHE[int(row_id)] = genres
+                missing_set.remove(row_id)
+                if not missing_set:
+                    break
+
+    for leftover in missing_set:
+        TMDB_GENRE_CACHE[int(leftover)] = []
+
+
+def _ensure_movie_genres(movie, movie_id):
+    existing = _parse_genre_string(movie.get('genres'))
+    if existing:
+        return existing
+
+    genres = db.get_movie_genres(movie_id)
+    if genres:
+        return genres
+
+    tmdb_id = movie.get('tmdb_id')
+    if tmdb_id:
+        _load_tmdb_genres_for_ids([tmdb_id])
+        genres = TMDB_GENRE_CACHE.get(int(tmdb_id), [])
+
+    if genres:
+        for name in genres:
+            existing_genre = db.get_genre_by_name(name)
+            if existing_genre:
+                genre_id = existing_genre['genre_id']
+            else:
+                genre_id = db.insert_genre(name)
+            db.link_movie_genre(movie_id, genre_id)
+
+    return genres
+
+
+def _prime_tmdb_genres_cache(movies):
+    tmdb_ids = {
+        int(m['tmdb_id']) for m in movies
+        if m and m.get('tmdb_id')
+    }
+    if tmdb_ids:
+        _load_tmdb_genres_for_ids(tmdb_ids)
 
 
 # ============================================================================
@@ -115,10 +187,37 @@ def get_profile():
         
         # Get user stats
         stats = db.get_user_stats(user_id)
-        
+
+        # Fallback: compute stats from interactions if view is missing or stale
+        interactions = db.get_user_interactions(user_id, limit=5000)
+        total_comparisons = len(interactions)
+        unique_movie_ids = set()
+        for interaction in interactions:
+            for key in ('movie_1_id', 'movie_2_id', 'chosen_movie_id'):
+                movie_id = interaction.get(key)
+                if movie_id:
+                    unique_movie_ids.add(movie_id)
+        unique_movies_seen = len(unique_movie_ids)
+
+        learning_target = max(1, int(Config.LEARNING_TARGET_COMPARISONS))
+
         if not stats:
-            return jsonify({'error': 'User not found'}), 404
-        
+            user = db.get_user_by_id(user_id)
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            stats = {
+                'user_id': user_id,
+                'username': user.get('username'),
+                'created_at': user.get('created_at'),
+                'total_comparisons': total_comparisons,
+                'unique_movies_seen': unique_movies_seen,
+                'learning_target': learning_target
+            }
+        else:
+            stats['total_comparisons'] = max(stats.get('total_comparisons', 0), total_comparisons)
+            stats['unique_movies_seen'] = max(stats.get('unique_movies_seen', 0), unique_movies_seen)
+            stats['learning_target'] = learning_target
+
         return jsonify(stats), 200
         
     except Exception as e:
@@ -154,6 +253,7 @@ def get_user_preferences():
         director_counts = {}
         actor_counts = {}
         chosen_movies = []
+        genre_movie_ids = set()
         ratings = []
         years = []
         
@@ -163,12 +263,7 @@ def get_user_preferences():
                 movie = db.get_movie_by_id(chosen_id)
                 if movie:
                     chosen_movies.append(movie)
-                    
-                    # Count genres
-                    if movie.get('genres'):
-                        for genre in movie['genres'].split(','):
-                            genre = genre.strip()
-                            genre_counts[genre] = genre_counts.get(genre, 0) + 1
+                    genre_movie_ids.add(chosen_id)
                     
                     # Count directors
                     if movie.get('directors'):
@@ -187,6 +282,33 @@ def get_user_preferences():
                         ratings.append(float(movie['tmdb_rating']))
                     if movie.get('release_year'):
                         years.append(movie['release_year'])
+
+            # Include both compared movies for genre-only fallback
+            movie_1_id = interaction.get('movie_1_id')
+            movie_2_id = interaction.get('movie_2_id')
+            if movie_1_id:
+                genre_movie_ids.add(movie_1_id)
+            if movie_2_id:
+                genre_movie_ids.add(movie_2_id)
+
+        _prime_tmdb_genres_cache(chosen_movies)
+
+        for movie in chosen_movies:
+            for genre in _ensure_movie_genres(movie, movie['movie_id']):
+                genre_counts[genre] = genre_counts.get(genre, 0) + 1
+
+        if not genre_counts and genre_movie_ids:
+            genre_movies = []
+            for movie_id in genre_movie_ids:
+                movie = db.get_movie_by_id(movie_id)
+                if movie:
+                    genre_movies.append(movie)
+
+            _prime_tmdb_genres_cache(genre_movies)
+
+            for movie in genre_movies:
+                for genre in _ensure_movie_genres(movie, movie['movie_id']):
+                    genre_counts[genre] = genre_counts.get(genre, 0) + 1
         
         # Sort and format results
         genre_preferences = [
@@ -308,12 +430,21 @@ def get_compared_movies():
             if interaction.get('movie_2_id'):
                 compared_ids.add(interaction['movie_2_id'])
         
+        include_genres = request.args.get('include_genres', '0').lower() in {'1', 'true', 'yes'}
+
         # Get movie details
         movies = []
         for movie_id in compared_ids:
             movie = db.get_movie_by_id(movie_id)
             if movie:
                 movies.append(movie)
+
+        if include_genres and movies:
+            _prime_tmdb_genres_cache(movies)
+            for movie in movies:
+                genres = _ensure_movie_genres(movie, movie['movie_id'])
+                if genres:
+                    movie['genres'] = ', '.join(genres)
         
         return jsonify({'movies': movies, 'count': len(movies)}), 200
         

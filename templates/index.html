@@ -254,7 +254,7 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
         try {
-            await loadComparedMovies();
+            loadComparedMovies();
             await loadCarousel();
             await loadAllSections();
             initializeHorizontalScroll();
@@ -265,14 +265,29 @@
             console.error('Page init error:', err);
         }
     });
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 1500) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(timeout);
+            return response;
+        } catch (error) {
+            clearTimeout(timeout);
+            throw error;
+        }
+    }
     
     // Load compared movies for filtering
     async function loadComparedMovies() {
         try {
-            const response = await fetch('/api/user/compared-movies');
+            const response = await fetchWithTimeout('/api/user/compared-movies');
             if (response.ok) {
                 const data = await response.json();
-                data.movies.forEach(movie => comparedMovieIds.add(movie.movie_id));
+                if (data && Array.isArray(data.movies)) {
+                    data.movies.forEach(movie => comparedMovieIds.add(movie.movie_id));
+                }
             }
         } catch (error) {
             console.log('Not authenticated or error loading compared movies');

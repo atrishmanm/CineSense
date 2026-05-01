@@ -145,12 +145,13 @@
                         </div>
                         <div>
                             <div class="font-semibold">${f.username}</div>
-                            <div class="text-sm text-gray-400">${f.email || ''}</div>
+                            <div class="text-sm text-gray-400">Friends since ${new Date(f.created_at).toLocaleDateString()}</div>
                         </div>
                     </div>
-                    <div class="text-sm text-gray-500">
-                        Friends since ${new Date(f.created_at).toLocaleDateString()}
-                    </div>
+                    <button onclick="removeFriend(${f.user_id})" 
+                        class="px-4 py-2 bg-gray-700 hover:bg-red-600/30 hover:text-red-400 text-gray-300 rounded-lg text-sm font-semibold transition border border-transparent hover:border-red-400/50">
+                        Remove
+                    </button>
                 </div>
             `).join('');
         } catch (error) {
@@ -223,6 +224,25 @@
             }
         } catch (error) {
             console.error('Accept request error:', error);
+        }
+    }
+
+    // Remove friend
+    async function removeFriend(friendId) {
+        if (!confirm('Are you sure you want to remove this friend?')) return;
+        
+        try {
+            const response = await fetch('/api/social/friends/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ friend_id: friendId })
+            });
+            const data = await response.json();
+            if (data.message) {
+                loadFriends();
+            }
+        } catch (error) {
+            console.error('Remove friend error:', error);
         }
     }
 

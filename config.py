@@ -52,6 +52,7 @@ class Config:
     # Memory & Temporal Decay
     TEMPORAL_DECAY_FACTOR = 0.7  # Weight for recent interactions (0.7 recent + 0.3 past)
     INTERACTION_MEMORY_WINDOW = 50  # Keep last N interactions with full weight
+    LEARNING_TARGET_COMPARISONS = int(os.getenv('LEARNING_TARGET_COMPARISONS', INTERACTION_MEMORY_WINDOW))
     
     # Model Paths
     MODEL_DIR = os.getenv('MODEL_DIR', './model')

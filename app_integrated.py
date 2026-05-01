@@ -23,6 +23,8 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('huggingface_hub').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
+CHAT_RECOMMENDATION_LIMIT = 20
+
 
 def _fallback_chat(message, db_manager):
     """Provide chat responses without AI models by using keyword matching"""
@@ -45,17 +47,17 @@ def _fallback_chat(message, db_manager):
         # Check for mood/genre keywords
         for keyword, genre in mood_genres.items():
             if keyword in message_lower:
-                movies = db_manager.get_movies_by_genre(genre, limit=10)
+                movies = db_manager.get_movies_by_genre(genre, limit=CHAT_RECOMMENDATION_LIMIT)
                 response = f"Based on your mood, here are some {genre.lower()} movies:"
                 break
         
         if not movies:
             # Check for trending keywords  
             if any(w in message_lower for w in ['trending', 'popular', 'hot', 'viral']):
-                movies = db_manager.get_top_movies(limit=10, order_by='popularity')
+                movies = db_manager.get_top_movies(limit=CHAT_RECOMMENDATION_LIMIT, order_by='popularity')
                 response = "Here are the most popular movies right now:"
             elif any(w in message_lower for w in ['recommend', 'suggest', 'watch', 'movie', 'film']):
-                movies = db_manager.get_top_movies(limit=10, order_by='tmdb_rating')
+                movies = db_manager.get_top_movies(limit=CHAT_RECOMMENDATION_LIMIT, order_by='tmdb_rating')
                 response = "Here are some highly-rated movies I recommend:"
             elif any(w in message_lower for w in ['hi', 'hello', 'hey']):
                 response = "Hey there! I'm your movie assistant. Tell me your mood or what kind of movies you like!"
@@ -64,7 +66,7 @@ def _fallback_chat(message, db_manager):
                 response = "You're welcome! Let me know if you need more recommendations."
                 return {'response': response, 'recommendations': [], 'type': 'chat'}
             else:
-                movies = db_manager.get_top_movies(limit=10, order_by='elo_score')
+                movies = db_manager.get_top_movies(limit=CHAT_RECOMMENDATION_LIMIT, order_by='elo_score')
                 response = "Here are some top-rated movies. Tell me your mood for more specific picks!"
     except Exception as e:
         logger.error(f"Fallback chat error: {e}")
@@ -100,7 +102,7 @@ def _fallback_mood(mood_input, db_manager):
     movies = []
     try:
         for genre in genres:
-            genre_movies = db_manager.get_movies_by_genre(genre, limit=10)
+            genre_movies = db_manager.get_movies_by_genre(genre, limit=CHAT_RECOMMENDATION_LIMIT)
             if genre_movies:
                 movies.extend(genre_movies)
         # Deduplicate
@@ -111,7 +113,7 @@ def _fallback_mood(mood_input, db_manager):
             if mid and mid not in seen:
                 seen.add(mid)
                 unique.append(m)
-        movies = unique[:10]
+        movies = unique[:CHAT_RECOMMENDATION_LIMIT]
     except Exception as e:
         logger.error(f"Fallback mood error: {e}")
     
@@ -367,7 +369,7 @@ def create_app():
 
         # --- 3. Trending / Popular ---
         if any(w in ml for w in ['trending', 'popular', 'viral', "what's hot", 'new releases', 'top movies']):
-            movies = db_manager.get_top_movies(limit=10, order_by='popularity')
+            movies = db_manager.get_top_movies(limit=CHAT_RECOMMENDATION_LIMIT, order_by='popularity')
             return jsonify({
                 'response': "Here are the most popular movies and shows right now:",
                 'recommendations': movies,
@@ -395,7 +397,7 @@ def create_app():
             try:
                 if 'mood_recommender' in app.ai_systems:
                     result = app.ai_systems['mood_recommender'].get_mood_recommendations(
-                        user_id=user_id, mood_input=message, top_k=10
+                        user_id=user_id, mood_input=message, top_k=CHAT_RECOMMENDATION_LIMIT
                     )
                 else:
                     result = _fallback_mood(message, db_manager)
@@ -413,7 +415,7 @@ def create_app():
         # --- 5. Semantic search — handles ALL content queries ---
         if app.semantic_search:
             try:
-                results = app.semantic_search.hybrid_search(message, top_k=10)
+                results = app.semantic_search.hybrid_search(message, top_k=CHAT_RECOMMENDATION_LIMIT)
                 if results:
                     for r in results:
                         r['search_score'] = round(

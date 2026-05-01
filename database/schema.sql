@@ -1,12 +1,4 @@
 -- Active: 1768449834747@@127.0.0.1@3306@cinesense
--- ============================================================================
--- CINESENSE COMPREHENSIVE DATABASE SCHEMA
--- Fully Normalized (3NF) Design - MySQL 8.0+
--- ============================================================================
--- Implements: Complete table structure, Triggers, Stored Procedures, 
---            Functions, Views, Cursors, Aggregate Functions, Joins, 
---            Set Operations, Constraints
--- ============================================================================
 
 USE cinesense;
 
@@ -1540,9 +1532,7 @@ END //
 
 DELIMITER ;
 
--- ============================================================================
--- SEED DATA (keywords)
--- ============================================================================
+
 
 INSERT IGNORE INTO keywords (keyword) VALUES
 ('thriller'),('action'),('comedy'),('romance'),('drama'),
@@ -1552,11 +1542,7 @@ INSERT IGNORE INTO keywords (keyword) VALUES
 
 SELECT 'Extended AI feature tables created successfully!' AS Status;
 
--- ============================================================================
--- ADVANCED DBMS FEATURES: Watchlist/Review Views, Functions, Triggers, Cursors
--- ============================================================================
 
--- View: user review summary
 DROP VIEW IF EXISTS user_review_summary;
 CREATE VIEW user_review_summary AS
 SELECT
@@ -1817,6 +1803,10 @@ BEGIN
         ORDER BY recommended_at DESC;
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
+    -- ACID — ISOLATION: READ COMMITTED prevents dirty reads without full serialization.
+    -- Each SELECT inside the cursor sees only committed rows, avoiding phantom reads
+    -- of recommendation_log entries inserted by concurrent sessions mid-loop.
+    SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
     START TRANSACTION;
     OPEN rec_cursor;
     rec_loop: LOOP
@@ -1924,8 +1914,11 @@ BEGIN
         SET p_result = CONCAT('ROLLED BACK — ', @msg);
         RELEASE SAVEPOINT elo_update;
     END;
+
+    SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
     START TRANSACTION;
     SAVEPOINT elo_update;
+
     SELECT elo_score INTO v_elo_w FROM movies WHERE movie_id = p_winner_id FOR UPDATE;
     SELECT elo_score INTO v_elo_l FROM movies WHERE movie_id = p_loser_id FOR UPDATE;
     IF v_elo_w IS NULL OR v_elo_l IS NULL THEN
@@ -1942,11 +1935,6 @@ BEGIN
 END //
 DELIMITER ;
 
--- ============================================================================
--- LAZY LOADING SUPPORT OBJECTS (Merged from migration SQL)
--- ============================================================================
-
--- View: cached movie subset prioritized by persistence and recency
 DROP VIEW IF EXISTS cached_movies;
 CREATE VIEW cached_movies AS
 SELECT
@@ -2102,3 +2090,91 @@ SET is_persisted = TRUE,
 WHERE movie_source IS NULL;
 
 SELECT 'All advanced DBMS features created successfully!' AS Status;
+
+DROP PROCEDURE IF EXISTS read_movie_elo_shared_lock;
+DELIMITER //
+CREATE PROCEDURE read_movie_elo_shared_lock(IN p_movie_id INT)
+BEGIN
+    -- Isolation level: REPEATABLE READ ensures the row snapshot is stable
+    -- for the duration of this transaction.
+    SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+    START TRANSACTION;
+
+    -- LOCK IN SHARE MODE = Shared Row-Level Lock (S Lock)
+    -- ✔ Multiple sessions can hold S locks on the same row concurrently
+    -- ✔ Protects against dirty reads and non-repeatable reads
+    -- ✘ Blocks any session that tries FOR UPDATE / UPDATE / DELETE on this row
+    SELECT
+        movie_id,
+        title,
+        elo_score,
+        comparison_count,
+        tmdb_rating
+    FROM movies
+    WHERE movie_id = p_movie_id
+    LOCK IN SHARE MODE;
+
+    COMMIT; -- Releases the shared lock
+END //
+DELIMITER ;
+
+--
+DROP PROCEDURE IF EXISTS generate_elo_report_table_read_lock;
+DELIMITER //
+CREATE PROCEDURE generate_elo_report_table_read_lock()
+BEGIN
+    -- Acquire shared TABLE-LEVEL read locks on all tables involved in the report.
+    -- No writes can occur on movies/genres/movie_genres while this lock is held.
+    LOCK TABLES
+        movies      READ,
+        genres      READ,
+        movie_genres READ;
+
+    -- Safe aggregate report — consistent snapshot guaranteed by the READ lock
+    SELECT
+        g.genre_name,
+        COUNT(DISTINCT m.movie_id)          AS total_movies,
+        ROUND(AVG(m.elo_score), 2)          AS avg_elo,
+        MAX(m.elo_score)                    AS highest_elo,
+        MIN(m.elo_score)                    AS lowest_elo,
+        SUM(m.comparison_count)             AS total_comparisons
+    FROM genres g
+    INNER JOIN movie_genres mg ON g.genre_id = mg.genre_id
+    INNER JOIN movies m       ON mg.movie_id = m.movie_id
+    GROUP BY g.genre_id
+    ORDER BY avg_elo DESC;
+
+    -- Release all table-level locks — other sessions can write again
+    UNLOCK TABLES;
+END //
+DELIMITER ;
+
+--
+DROP PROCEDURE IF EXISTS bulk_elo_reset_table_write_lock;
+DELIMITER //
+CREATE PROCEDURE bulk_elo_reset_table_write_lock(IN p_min_comparisons INT)
+BEGIN
+    DECLARE v_rows_reset INT DEFAULT 0;
+
+    -- Acquire exclusive TABLE-LEVEL write lock on movies.
+    -- Effect: ALL other sessions are blocked from reading or writing movies
+    -- until UNLOCK TABLES is issued — guarantees no session sees a partial reset.
+    LOCK TABLES movies WRITE;
+
+    -- Bulk operation: reset ELO back to 1500 for under-compared movies
+    UPDATE movies
+    SET elo_score = 1500
+    WHERE comparison_count < p_min_comparisons;
+
+    SET v_rows_reset = ROW_COUNT();
+
+    -- Release the exclusive table lock
+    UNLOCK TABLES;
+
+    SELECT v_rows_reset AS rows_reset,
+           'ELO reset complete — table lock released' AS status;
+END //
+DELIMITER ;
+
+
+SELECT 'Concurrency control procedures created successfully!' AS Status;

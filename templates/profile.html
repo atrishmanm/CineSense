@@ -154,6 +154,12 @@
             // Update stats
             updateStats(profile, preferences, interactions);
 
+            if (!preferences.genre_preferences || preferences.genre_preferences.length === 0) {
+                await loadGenreFallback();
+            } else if (document.getElementById('stat-top-genre').textContent === '-') {
+                await loadGenreFallback();
+            }
+
             // Generate AI taste summary
             generateTasteSummary(preferences, interactions);
 
@@ -195,7 +201,8 @@
         document.getElementById('stat-comparisons').textContent = profile.total_comparisons || 0;
         document.getElementById('stat-movies-seen').textContent = profile.unique_movies_seen || 0;
         
-        const learningProgress = Math.min(100, Math.round((profile.total_comparisons / 50) * 100));
+        const learningTarget = profile.learning_target || 50;
+        const learningProgress = Math.min(100, Math.round((profile.total_comparisons / learningTarget) * 100));
         document.getElementById('stat-ai-learning').textContent = `${learningProgress}%`;
         
         const topGenre = preferences.genre_preferences && preferences.genre_preferences.length > 0
@@ -393,6 +400,36 @@
                 <span class="text-gray-400 text-sm">${actor.count} movies</span>
             </div>
         `).join('');
+    }
+
+    async function loadGenreFallback() {
+        try {
+            const response = await fetch('/api/user/compared-movies?include_genres=1');
+            const data = await response.json();
+            const movies = data.movies || [];
+            if (movies.length === 0) return;
+
+            const genreCounts = {};
+            for (const movie of movies) {
+                if (!movie.genres) continue;
+                for (const genre of movie.genres.split(',')) {
+                    const name = genre.trim();
+                    if (!name) continue;
+                    genreCounts[name] = (genreCounts[name] || 0) + 1;
+                }
+            }
+
+            const genrePreferences = Object.entries(genreCounts)
+                .map(([genre, count]) => ({ genre, count }))
+                .sort((a, b) => b.count - a.count);
+
+            if (genrePreferences.length > 0) {
+                document.getElementById('stat-top-genre').textContent = genrePreferences[0].genre;
+                renderGenreChart(genrePreferences);
+            }
+        } catch (error) {
+            console.error('Genre fallback error:', error);
+        }
     }
 </script>
 {% endblock %}

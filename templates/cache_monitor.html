@@ -261,10 +261,9 @@ const CacheMonitorDashboard = {
     
     async updateDashboard() {
         try {
-            // Use correct endpoint - getCacheStats instead of monitorCache
-            const response = await window.CineSense.API.getCacheStats();
+            const response = await this.getCacheStatsSafe();
             
-            if (!response || !response.success) {
+            if (!response || response.success === false) {
                 throw new Error(response?.error || 'Failed to fetch cache stats');
             }
             
@@ -277,9 +276,6 @@ const CacheMonitorDashboard = {
             // Update charts
             this.updateCharts(monitor);
             
-            // Log activity
-            this.logActivity('Cache stats updated', 'info');
-            
         } catch (error) {
             console.error('Error updating dashboard:', error);
             this.logActivity(`Error: ${error.message}`, 'error');
@@ -287,6 +283,14 @@ const CacheMonitorDashboard = {
             // Don't crash - just show error state
             this.showErrorState(error.message);
         }
+    },
+
+    async getCacheStatsSafe() {
+        if (window.CineSense && window.CineSense.API && window.CineSense.API.getCacheStats) {
+            return window.CineSense.API.getCacheStats();
+        }
+        const response = await fetch('/api/cache/stats');
+        return response.json();
     },
     
     transformCacheStats(response) {
@@ -401,8 +405,8 @@ const CacheMonitorDashboard = {
         
         this.activityLog.push(logEntry);
         
-        // Keep only last 100 entries
-        if (this.activityLog.length > 100) {
+        // Keep only last 50 entries
+        if (this.activityLog.length > 50) {
             this.activityLog.shift();
         }
         

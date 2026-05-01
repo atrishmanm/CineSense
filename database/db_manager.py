@@ -146,6 +146,20 @@ class DatabaseManager:
         with self.get_cursor() as cursor:
             cursor.execute(query, (movie_id,))
             return cursor.fetchone()
+
+    def get_movie_genres(self, movie_id):
+        """Get genre names for a movie by ID"""
+        query = """
+            SELECT g.genre_name
+            FROM movie_genres mg
+            JOIN genres g ON mg.genre_id = g.genre_id
+            WHERE mg.movie_id = %s
+            ORDER BY g.genre_name
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (movie_id,))
+            rows = cursor.fetchall()
+            return [row['genre_name'] for row in rows] if rows else []
     
     def get_random_movies(self, limit=10, min_popularity=0):
         """Get random movies for comparison"""
