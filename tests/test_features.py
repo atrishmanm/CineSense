@@ -30,13 +30,9 @@ def print_result(feature, status, details=""):
 
 def test_server():
     """Test if server is running"""
-    try:
-        response = requests.get(BASE_URL, timeout=5)
-        print_result("Server Status", True, "CineSense is running")
-        return True
-    except:
-        print_result("Server Status", False, "Server not responding")
-        return False
+    response = requests.get(BASE_URL, timeout=5)
+    assert response.status_code == 200
+    print_result("Server Status", True, "CineSense is running")
 
 def test_chat():
     """Test conversational AI"""
