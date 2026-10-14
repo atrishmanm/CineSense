@@ -9,7 +9,20 @@ import time
 from typing import Dict, Any
 import sys
 
+import pytest
+
 BASE_URL = "http://localhost:5000"
+
+
+def _server_up() -> bool:
+    try:
+        return requests.get(BASE_URL, timeout=5).status_code == 200
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _server_up(), reason="live server at localhost:5000 not running")
 
 class Colors:
     GREEN = '\033[92m'
@@ -27,13 +40,10 @@ def print_result(test_name: str, success: bool, details: str = "", time_taken: f
     if details:
         print(f"   → {details}")
 
-def test_server_health() -> bool:
+def test_server_health() -> None:
     """Test if server is running"""
-    try:
-        response = requests.get(BASE_URL, timeout=5)
-        return response.status_code == 200
-    except:
-        return False
+    response = requests.get(BASE_URL, timeout=5)
+    assert response.status_code == 200
 
 def test_conversational_ai():
     """Test chatbot with warmup"""
@@ -250,7 +260,9 @@ def run_comprehensive_test():
     
     # Check server first
     print(f"\n{Colors.BOLD}🌐 Checking Server Status...{Colors.ENDC}\n")
-    if not test_server_health():
+    try:
+        test_server_health()
+    except Exception:
         print_result("Server Status", False, "Server not running!")
         print(f"\n{Colors.RED}❌ Start the server first: python app_integrated.py{Colors.ENDC}\n")
         return

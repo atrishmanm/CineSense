@@ -7,6 +7,8 @@
   "hardware": "2x GPUs (DataParallel)",
   "best_epoch": 3,
   "rmse_target_achieved": true,
+  "offline_artifact_note": "Kaggle training artifact (not wired into the Flask app; DL scoring is OFF by default). Rating metrics are held-out; ranking metrics below use a sampled protocol (550 users, 500 sampled candidates) — see evaluation_caveat. Do not compare ranking numbers to full-catalog benchmarks.",
+  "evaluation_caveat": "ranking_500_users evaluated first 550 test users against first 500 unseen items among first 3000 item indices (sampled, not full catalog).",
   "normalized_regression": {
     "rmse": 0.1706,
     "mae": 0.128,

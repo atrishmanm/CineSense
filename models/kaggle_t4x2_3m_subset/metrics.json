@@ -1,12 +1,14 @@
 {
-  "model_name": "CineSenseDeepV3_DCN_FM_Attention_32M",
-  "dataset": "MovieLens-32M",
+  "model_name": "CineSenseDeepV3_DCN_FM_Attention_3M_Subset",
+  "dataset": "MovieLens-32M (3M-rating subset; NOT the full 32M)",
   "total_ratings_loaded": 3000000,
   "unique_users": 18915,
   "unique_items": 42716,
   "hardware": "2x GPUs (DataParallel)",
   "best_epoch": 3,
   "rmse_target_achieved": true,
+  "offline_artifact_note": "Kaggle training artifact. Rating metrics are held-out; ranking metrics below use a sampled protocol (550 users, 500 sampled candidates) — see evaluation_caveat. Do not compare ranking numbers to full-catalog benchmarks.",
+  "evaluation_caveat": "ranking_500_users evaluated first 550 test users against first 500 unseen items among first 3000 item indices (sampled, not full catalog).",
   "normalized_regression": {
     "rmse": 0.178,
     "mae": 0.1346,

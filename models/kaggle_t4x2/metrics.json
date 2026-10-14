@@ -3,6 +3,8 @@
   "hardware": "2x GPUs (DataParallel)",
   "dataset": "MovieLens-100K",
   "best_epoch": 3,
+  "offline_artifact_note": "Kaggle training artifact (not wired into the Flask app; DL scoring is OFF by default). Raw RMSE 0.949 has no local training script reproducing it — use training/train_100k.py + benchmarks/run_all_benchmarks.py for reproducible ML-100K numbers. Only normalized-scale claims are meaningless; cite raw RMSE.",
+  "evaluation_caveat": "Ranking metrics use the Kaggle notebook's sampled protocol, not the full catalog. For full-catalog ranking, run benchmarks/run_all_benchmarks.py.",
   "normalized_regression": {
     "rmse": 0.2373,
     "mae": 0.1873,

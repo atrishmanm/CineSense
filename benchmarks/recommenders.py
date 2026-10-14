@@ -246,3 +246,48 @@ class HybridRecommender(BaseRecommender):
         pref = 1.0 / (1.0 + np.exp(-5.0 * pref_raw))
 
         return self.w_content * c + self.w_preference * pref + self.w_elo * elo
+
+
+# -- E. Hybrid + popularity prior (RRF fusion) ---------------------
+
+class HybridPopularityRecommender(BaseRecommender):
+    """Hybrid signals fused with a global popularity prior.
+
+    Uses reciprocal rank fusion (RRF, k=60): the per-user hybrid ranking and
+    the global popularity ranking each vote. Tests whether a popularity prior
+    closes the ranking gap to the pure popularity baseline without giving up
+    personalization entirely (coverage/novelty stay above popularity-only).
+    """
+
+    def __init__(
+        self,
+        w_content: float = 0.50,
+        w_preference: float = 0.30,
+        w_elo: float = 0.20,
+        relevance_threshold: float = 4.0,
+        rrf_k: float = 60.0,
+        name: str = "Hybrid+Popularity (RRF)",
+    ) -> None:
+        super().__init__(name)
+        self.rrf_k = rrf_k
+        self._hybrid = HybridRecommender(w_content, w_preference, w_elo,
+                                         relevance_threshold)
+        self._pop = PopularityRecommender(relevance_threshold)
+
+    def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
+        self._hybrid.fit(train_ratings, movies)
+        self._pop.fit(train_ratings, movies)
+
+    def score_item(self, user_id: int, item_id: int) -> float:
+        return self._hybrid.score_item(user_id, item_id)
+
+    def recommend(self, user_id: int, k: int, candidates: Set[int]) -> List[int]:
+        cands = list(candidates)
+        h_rank = {m: r + 1 for r, m in
+                  enumerate(self._hybrid.recommend(user_id, len(cands), set(cands)))}
+        p_rank = {m: r + 1 for r, m in
+                  enumerate(self._pop.recommend(user_id, len(cands), set(cands)))}
+        fused = [(m, 1.0 / (self.rrf_k + h_rank[m]) + 1.0 / (self.rrf_k + p_rank[m]))
+                 for m in cands]
+        fused.sort(key=lambda x: x[1], reverse=True)
+        return [m for m, _ in fused[:k]]

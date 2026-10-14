@@ -3,15 +3,19 @@
 CineSense MovieLens-32M Comprehensive Benchmark Suite
 =====================================================
 
-Evaluates recommendation algorithms on real MovieLens-32M data (87,585 movies):
-- 500+ evaluation users tested
-- 500 candidate retrieval pool (Stage 1 Funnel)
-- 500 bootstrap iterations for paired 95% confidence intervals
-- Complete regression metrics (Normalized RMSE < 0.50 Target, Raw RMSE, MAE, R^2)
+Evaluates recommendation algorithms on real MovieLens-32M data:
+- Configurable evaluation-user count and candidate retrieval pool (see CLI/constants)
+- Bootstrap iterations for paired 95% confidence intervals
+- Complete regression metrics (normalized RMSE for comparability, raw RMSE as the
+  meaningful scale, MAE, R^2)
 - Decision support / classification metrics (Acc, Prec, Rec, F1, ROC-AUC, PR-AUC, MCC)
 - Top-10 Ranking metrics (NDCG@10, Hit Rate@10, MAP@10, MRR@10)
 - Beyond-Accuracy & Distributional metrics (Catalog Coverage, Gini, Novelty, ILD)
 - Multi-Stage Production Architecture (HNSW + Platt Calibration + DPP Fast MAP)
+
+NOTE: "Deep V3/V4" models in this file are local offline surrogates (MF+content
+fusions), not the Kaggle-trained torch checkpoints in models/. Their metrics are
+computed on the held-out split by this script.
 """
 
 from __future__ import annotations
@@ -321,7 +325,8 @@ class CineSenseUltraDeepV4:
     2. High-capacity Biased SVD + 20-dim Genre Vector Inner Products.
     3. Degree-bounded non-linear feature crossing.
     4. Minimum-variance convex combination.
-    Achieves verified RMSE < 0.18 in normalized rating space (strictly below 0.30 target!).
+    NOTE: Offline surrogate — its metrics are COMPUTED by this script on the
+    held-out split, not claimed here. See the generated report for numbers.
     """
     def __init__(self, mf: BiasedMatrixFactorization, content: ContentBasedRecommender, movies: Dict[int, Movie]):
         self.name = "CineSense Ultra Deep V4 (Bayesian + DCN-v2 + FM Ensemble)"
@@ -624,7 +629,7 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         "# CineSense MovieLens-32M Comprehensive Benchmark Report",
         "",
         f"**Corpus:** MovieLens-32M ({meta['movies_count']:,} Movies, {meta['ratings_ingested']:,} Ratings Sample)",  # noqa: E501
-        f"**Evaluated Users:** {meta['evaluation_users_count']} users (500+ improvements verified)",
+        f"**Evaluated Users:** {meta['evaluation_users_count']} users",
         f"**Candidate Retrieval Pool:** {meta['candidate_retrieval_pool_k']} candidates per request",
         f"**Relevance Threshold:** Rating >= {meta['relevance_threshold']} Stars",
         "",
@@ -675,7 +680,7 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         "",
         "---",
         "",
-        "## 4. Top-10 Ranking Quality & Distributional Beyond-Accuracy (500+ Users)",
+        "## 4. Top-10 Ranking Quality & Distributional Beyond-Accuracy",
         "",
         "| Architecture | NDCG@10 (^) | Hit Rate@10 (^) | Precision@10 | Recall@10 | Coverage@10 (^) | Gini (v) | Novelty (bits) | ILD |",
         "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
@@ -686,17 +691,21 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         ba = data["beyond_accuracy_metrics"]
         lines.append(f"| **{name}** | {rm['ndcg@10']:.4f} | {rm['hit_rate@10']*100:.2f}% | {rm['precision@10']:.4f} | {rm['recall@10']:.4f} | {ba['catalog_coverage@10']*100:.2f}% | {ba['gini_coefficient']:.4f} | {ba['mean_novelty_bits']:.2f} | {ba['intra_list_diversity']:.4f} |")
 
+    v3_rmse = models.get(
+        "CineSense Deep V3 (DCN-v2 + FM on 32M)",
+        next(iter(models.values())),
+    )["normalized_regression_metrics"]["rmse"]
     lines.extend([
         "",
         "---",
         "",
-        "## 5. Architectural Improvements Summary (500+ Improvements)",
+        "## 5. Configuration Notes",
         "",
-        "1. **Pairwise Preference Learning Scale:** Expanded default `LEARNING_TARGET_COMPARISONS` to 500 comparisons for stable Bradley-Terry/ELO convergence.",
-        "2. **Candidate Retrieval Stage Scale:** Expanded candidate pool $K_{\\text{cand}}$ to 500 candidates per inference query.",
-        "3. **Statistical Sample Depth:** Evaluated on 500+ held-out users across 87,585 MovieLens-32M titles.",
-        "4. **Verified RMSE < 0.50:** All architectures achieve normalized RMSE strictly below 0.50, with CineSense Deep V3 reaching 0.2285.",
-        "5. **Dual T4x2 GPU Cloud Training:** Full PyTorch AMP FP16 DataParallel training on Kaggle Cloud GPU.",
+        "1. **Pairwise Preference Learning Scale:** Default `LEARNING_TARGET_COMPARISONS` is 500 comparisons for stable Bradley-Terry/ELO convergence (config value, not a measured result).",
+        "2. **Candidate Retrieval Stage Scale:** Candidate pool $K_{\\text{cand}}$ is 500 candidates per inference query in this run.",
+        f"3. **Sample Depth:** Evaluated on {meta['evaluation_users_count']} held-out users.",
+        f"4. **Normalized RMSE < 0.30 target:** Per-model status is in Table 1 above; CineSense Deep V3 surrogate norm RMSE in this run: {v3_rmse:.4f}. Raw RMSE is the meaningful scale — normalized values are for comparability only.",
+        "5. **Dual T4x2 GPU Cloud Training:** Full PyTorch AMP FP16 DataParallel training on Kaggle Cloud GPU (offline artifact; see models/).",
         "",
     ])
 

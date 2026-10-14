@@ -137,13 +137,15 @@ def run_semantic_benchmark(movies: Dict[int, Movie], k: int = 10) -> Dict[str, A
                     s = 0.50 * lexical_score + 0.50 * dense_score
 
                 if s > 0:
-                    scores.append((mid, s))
+                    # Tie-break by lexical overlap (then mid): genre-cosine ties
+                    # are otherwise ordered by catalog id, which buries exact titles.
+                    scores.append((mid, s, lexical_score, mid))
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
             latencies.append(elapsed_ms)
 
-            scores.sort(key=lambda x: x[1], reverse=True)
-            top_recs = [mid for mid, _ in scores[:k]]
+            scores.sort(key=lambda x: (x[1], x[2], -x[3]), reverse=True)
+            top_recs = [mid for mid, _, _, _ in scores[:k]]
 
             if not top_recs:
                 zero_results += 1

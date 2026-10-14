@@ -110,12 +110,11 @@ class Config:
     USE_CANDIDATE_GENERATION = True  # Enable candidate generation (vs scoring all)
     FINAL_RECOMMENDATION_COUNT = 20  # Return top 20 after ranking candidates
 
-    # Deep Learning Ensemble (NeuMF V2)
-    # Disabled by default unless checkpoints are explicitly provisioned.
+    # Deep Learning Ensemble (NeuMF V2) — OFFLINE / RESEARCH ONLY.
+    # Checkpoints are not bundled and DL scoring stays disabled unless
+    # checkpoints are explicitly provisioned. Do not cite training-time
+    # numbers; use benchmarks/run_all_benchmarks.py for held-out results.
     USE_DL_SCORING = os.getenv('USE_DL_SCORING', '0').lower() in {'1', 'true', 'yes', 'on'}
     DL_SCORE_WEIGHT = 0.15  # Weight of DL genre affinity in final score
     DL_V2_CHECKPOINT = os.getenv('DL_V2_CHECKPOINT', 'cinesense_v2.pt')  # Phase 2 ensemble (8 models)
     DL_V1_CHECKPOINT = os.getenv('DL_V1_CHECKPOINT', 'cinesense_model_final.pt')  # Phase 1 ensemble (5 models)
-    # NOTE: This RMSE was observed during training. Use benchmarks/run_all_benchmarks.py
-    # for verified, reproducible evaluation metrics on held-out test data.
-    DL_ENSEMBLE_RMSE = 0.8932  # Training-time metric — see benchmarks/ for held-out results

@@ -7,7 +7,20 @@ import requests
 import json
 from time import sleep
 
+import pytest
+
 BASE_URL = "http://localhost:5000"
+
+
+def _server_up() -> bool:
+    try:
+        return requests.get(BASE_URL, timeout=5).status_code == 200
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _server_up(), reason="live server at localhost:5000 not running")
 
 def print_result(feature, status, details=""):
     symbol = "✅" if status else "❌"

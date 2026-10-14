@@ -2095,15 +2095,12 @@ DROP PROCEDURE IF EXISTS read_movie_elo_shared_lock;
 DELIMITER //
 CREATE PROCEDURE read_movie_elo_shared_lock(IN p_movie_id INT)
 BEGIN
-    -- Isolation level: REPEATABLE READ ensures the row snapshot is stable
-    -- for the duration of this transaction.
-    SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+    -- Shared row-level lock (S lock) via FOR SHARE: concurrent readers OK,
+    -- writers (FOR UPDATE / UPDATE / DELETE) on this row block until COMMIT.
+    -- NOTE: LOCK TABLES is illegal inside stored programs, so row-level
+    -- locking + a short transaction is the correct primitive here.
     START TRANSACTION;
 
-    -- LOCK IN SHARE MODE = Shared Row-Level Lock (S Lock)
-    -- ✔ Multiple sessions can hold S locks on the same row concurrently
-    -- ✔ Protects against dirty reads and non-repeatable reads
-    -- ✘ Blocks any session that tries FOR UPDATE / UPDATE / DELETE on this row
     SELECT
         movie_id,
         title,
@@ -2112,7 +2109,7 @@ BEGIN
         tmdb_rating
     FROM movies
     WHERE movie_id = p_movie_id
-    LOCK IN SHARE MODE;
+    FOR SHARE;
 
     COMMIT; -- Releases the shared lock
 END //
@@ -2123,14 +2120,9 @@ DROP PROCEDURE IF EXISTS generate_elo_report_table_read_lock;
 DELIMITER //
 CREATE PROCEDURE generate_elo_report_table_read_lock()
 BEGIN
-    -- Acquire shared TABLE-LEVEL read locks on all tables involved in the report.
-    -- No writes can occur on movies/genres/movie_genres while this lock is held.
-    LOCK TABLES
-        movies      READ,
-        genres      READ,
-        movie_genres READ;
-
-    -- Safe aggregate report — consistent snapshot guaranteed by the READ lock
+    -- Consistent aggregate report. NOTE: LOCK TABLES is illegal inside
+    -- stored programs; a single SELECT already sees a consistent snapshot
+    -- under InnoDB REPEATABLE READ, which is all a report needs.
     SELECT
         g.genre_name,
         COUNT(DISTINCT m.movie_id)          AS total_movies,
@@ -2143,9 +2135,6 @@ BEGIN
     INNER JOIN movies m       ON mg.movie_id = m.movie_id
     GROUP BY g.genre_id
     ORDER BY avg_elo DESC;
-
-    -- Release all table-level locks — other sessions can write again
-    UNLOCK TABLES;
 END //
 DELIMITER ;
 
@@ -2156,10 +2145,10 @@ CREATE PROCEDURE bulk_elo_reset_table_write_lock(IN p_min_comparisons INT)
 BEGIN
     DECLARE v_rows_reset INT DEFAULT 0;
 
-    -- Acquire exclusive TABLE-LEVEL write lock on movies.
-    -- Effect: ALL other sessions are blocked from reading or writing movies
-    -- until UNLOCK TABLES is issued — guarantees no session sees a partial reset.
-    LOCK TABLES movies WRITE;
+    -- NOTE: LOCK TABLES is illegal inside stored programs. A single-statement
+    -- UPDATE is already atomic; the explicit transaction makes the
+    -- reset + row-count read consistent. No session sees a partial reset.
+    START TRANSACTION;
 
     -- Bulk operation: reset ELO back to 1500 for under-compared movies
     UPDATE movies
@@ -2168,11 +2157,10 @@ BEGIN
 
     SET v_rows_reset = ROW_COUNT();
 
-    -- Release the exclusive table lock
-    UNLOCK TABLES;
+    COMMIT;
 
     SELECT v_rows_reset AS rows_reset,
-           'ELO reset complete — table lock released' AS status;
+           'ELO reset complete' AS status;
 END //
 DELIMITER ;
 

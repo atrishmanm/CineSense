@@ -98,7 +98,7 @@ class CineSenseRecommender:
                         v1_path=str(v1_checkpoint)
                     )
                     if self.dl_scorer.is_loaded:
-                        logger.info("DL ensemble scorer loaded (13-model NeuMF, RMSE=0.8932)")
+                        logger.info("DL ensemble scorer loaded (13-model NeuMF)")
                     else:
                         logger.warning("DL scorer checkpoint load incomplete - genre affinity disabled")
                         self.dl_scorer = None

@@ -176,7 +176,7 @@ class EnsembleScorer:
 
     1. **CF scoring** — `score(user_idx, movie_idx)` for MovieLens-100K
        user/movie indices.  Uses full 13-model ensemble with optimized
-       weights.  RMSE = 0.8932.
+       weights (checkpoints not bundled; see benchmarks for held-out metrics).
 
     2. **Genre affinity** — `genre_affinity_score(user_genre_vec, movie_genre_vec)`
        uses the *learned* genre interaction projection weights to compute

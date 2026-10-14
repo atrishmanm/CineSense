@@ -3,7 +3,7 @@ STEP 8: Online Inference (Flask Integration)
 Production-ready inference using trained models.
 
 Supports two backends:
-  - 'ensemble' (default) — NeuMF V2 mega-ensemble (RMSE 0.8932)
+  - 'ensemble' (default) — NeuMF V2 mega-ensemble (offline checkpoints, not bundled)
   - 'hybrid'  — Legacy HybridRecommender from training/models.py
 """
 
@@ -204,7 +204,7 @@ class EnsembleProductionRecommender:
     
     Loads cinesense_v2.pt + cinesense_model_final.pt and scores
     MovieLens-100K user/movie pairs using the 13-model ensemble
-    with optimized weights (RMSE = 0.8932).
+    with optimized weights (offline checkpoints, not bundled).
     """
     
     model_type = 'ensemble'

@@ -4,10 +4,11 @@ CineSense -- Comprehensive Recommendation Systems Benchmark Suite
 ==================================================================
 
 Evaluates:
-A. Recommendation Quality across 4 Strategies + Paired Bootstrap 95% CIs
+A. Recommendation Quality across 5 Strategies + Paired Bootstrap 95% CIs
 B. Hybrid Weight Ablation Study (Validation and Held-out Test)
 C. Latency & Sliding-Window Cache Profiling under Load
 D. Cold-Start Performance Segmented by User Activity Tiers
+D2. Simulated New-User Cold Start (truncated history, Popularity vs Hybrid vs Hybrid+Pop)
 E. Two-Stage Candidate Retrieval (Recall@K_cand) vs Stage 2 Hybrid Reranking
 F. Semantic Search Benchmark on Labeled Intent Queries (Lexical vs Dense vs Hybrid)
 G. Diversity-Aware Discovery (MMR lambda trade-off) & Traceable Explanations
@@ -41,6 +42,7 @@ from benchmarks.metrics import evaluate_all, paired_bootstrap_ci
 from benchmarks.recommenders import (
     BaseRecommender,
     ContentRecommender,
+    HybridPopularityRecommender,
     HybridRecommender,
     PopularityRecommender,
     PreferenceEloRecommender,
@@ -94,7 +96,7 @@ def run_part_a(
     movies, splits, user_train_items, test_relevant, item_pop, item_feats,
 ) -> Dict[str, Dict[str, Any]]:
     print("\n" + "=" * 72)
-    print("PART A  -  Recommendation Quality Across 4 Strategies")
+    print("PART A  -  Recommendation Quality Across 5 Strategies")
     print("=" * 72)
 
     strategies: List[BaseRecommender] = [
@@ -102,6 +104,7 @@ def run_part_a(
         ContentRecommender(RELEVANCE_THRESHOLD),
         PreferenceEloRecommender(relevance_threshold=RELEVANCE_THRESHOLD),
         HybridRecommender(0.50, 0.30, 0.20, RELEVANCE_THRESHOLD),
+        HybridPopularityRecommender(0.50, 0.30, 0.20, RELEVANCE_THRESHOLD),
     ]
 
     results: Dict[str, Dict[str, Any]] = {}
@@ -307,6 +310,65 @@ def run_part_d(
     return results
 
 
+# -- Part D2: Simulated new/low-activity users ---------------------
+# Users with <5 interactions never enter eval_users, so Part D cannot see
+# true cold start. Here we truncate history to k most-recent train
+# interactions for a fixed cohort and refit, isolating the cold-start effect.
+
+_COLD_START_KS = (0, 2, 5)
+_COLD_START_N = 200
+
+
+def run_part_d2(
+    movies, splits, test_relevant, item_pop, item_feats,
+) -> Dict[str, Dict[str, Any]]:
+    print("\n" + "=" * 72)
+    print("PART D2 -  Simulated New-User Cold Start (truncated history)")
+    print("=" * 72)
+
+    rng = np.random.RandomState(SEED)
+    cohort = sorted(splits["eval_users"])
+    cohort = [u for u in cohort if u in test_relevant and test_relevant[u]]
+    cohort = list(rng.choice(cohort, size=min(_COLD_START_N, len(cohort)),
+                             replace=False))
+
+    by_user: Dict[int, List] = defaultdict(list)
+    for r in splits["train"]:
+        if r.user_id in set(cohort):
+            by_user[r.user_id].append(r)
+    for u in by_user:
+        by_user[u].sort(key=lambda r: r.timestamp)
+
+    others = [r for r in splits["train"] if r.user_id not in set(cohort)]
+    results: Dict[str, Dict[str, Any]] = {}
+    for k in _COLD_START_KS:
+        trunc = list(others)
+        trunc_items: Dict[int, Set[int]] = defaultdict(set)
+        for r in others:
+            trunc_items[r.user_id].add(r.item_id)
+        for u in cohort:
+            kept = by_user[u][-k:] if k > 0 else []
+            trunc.extend(kept)
+            trunc_items[u] = {r.item_id for r in kept}
+
+        for rec in (PopularityRecommender(RELEVANCE_THRESHOLD),
+                    HybridRecommender(0.50, 0.30, 0.20, RELEVANCE_THRESHOLD),
+                    HybridPopularityRecommender(0.50, 0.30, 0.20,
+                                                RELEVANCE_THRESHOLD)):
+            rec.fit(trunc, movies)
+            recs = rec.recommend_all(set(cohort), K, trunc_items,
+                                     splits["catalog"])
+            m = evaluate_all(recs, test_relevant, len(splits["catalog"]),
+                             item_pop, item_feats, K)
+            key = f"k={k} | {rec.name}"
+            results[key] = m
+            print(f"  {key}: NDCG@{K}={m[f'ndcg@{K}']:.4f} "
+                  f"HitRate@{K}={m[f'hit_rate@{K}']:.4f} "
+                  f"(n={m.get('n_eval_users', 0)})")
+
+    return results
+
+
 # -- Report Generation --
 
 def _f(v: Any) -> str:
@@ -321,6 +383,7 @@ def generate_report(
     ablation_test: Dict,
     latency: Dict,
     coldstart: Dict,
+    coldstart_sim: Dict,
     two_stage: Dict,
     semantic: Dict,
     diversity: Dict,
@@ -410,6 +473,18 @@ def generate_report(
               f"| {_f(m.get(f'precision@{K}',0))} "
               f"| {_f(m.get(f'recall@{K}',0))} |\n")
         w("\n")
+        w("### D2 -- Simulated new users (history truncated to k recent interactions, "
+          "200-user cohort, refit per k)\n\n")
+        w(f"| History | Strategy | Users | NDCG@{K} | Hit Rate@{K} |\n")
+        w("|---|---|---|---|---|\n")
+        for k in _COLD_START_KS:
+            for sname in ("Popularity", "Hybrid(50%/30%/20%)",
+                          "Hybrid+Popularity (RRF)"):
+                m = coldstart_sim.get(f"k={k} | {sname}", {})
+                n = m.get("n_eval_users", 0)
+                w(f"| k={k} | {sname} | {n} | {_f(m.get(f'ndcg@{K}',0))} "
+                  f"| {_f(m.get(f'hit_rate@{K}',0))} |\n")
+        w("\n")
 
         # -- E --
         w("## E -- Two-Stage Retrieval vs Ranking Benchmark\n\n")
@@ -433,7 +508,11 @@ def generate_report(
             w(f"| **{smethod}** | {sm[f'recall@{K}']:.4f} | {sm[f'mrr@{K}']:.4f} | "
               f"{sm[f'ndcg@{K}']:.4f} | {sm['zero_result_rate']:.1%} | "
               f"{sm['p50_latency_ms']:.2f} ms | {sm['p95_latency_ms']:.2f} ms |\n")
-        w("\n")
+        w("\n*Dense here = torch-free genre-vector cosine stand-in (not the production "
+          "768-d transformer embeddings); ties broken by title-token overlap. "
+          "Genre vectors carry no title signal while ground truth is title-based, "
+          "so dense ~= 0 is expected — this section measures the lexical path, not "
+          "production semantic search.*\n\n")
 
         # -- G --
         w("## G -- Diversity-Aware Discovery & Explainability Trade-Off\n\n")
@@ -449,7 +528,7 @@ def generate_report(
         w("---\n\n## Resume-Ready Portfolio Bullets\n\n```text\n")
         n_eval = quality.get("Popularity", {}).get("n_eval_users", 906)
         w(f"CineSense | Python, Flask, PyTorch, scikit-learn, MySQL, Redis\n")
-        w(f"* Evaluated 4 recommendation strategies on {n_eval} held-out users\n")
+        w(f"* Evaluated 5 recommendation strategies on {n_eval} held-out users\n")
         w(f"  from MovieLens-100K; hybrid scoring delivers 5.5x higher catalog coverage\n")
         w(f"  (21.8% vs 4.0%) and higher novelty (4.46 bits) than popularity baselines.\n")
         w(f"* Built and profiled a 2-stage retrieval pipeline: candidate recall reached\n")
@@ -484,6 +563,7 @@ def generate_report(
         "ablation_test": _clean_for_json(ablation_test),
         "latency": _clean_for_json(latency),
         "coldstart": _clean_for_json(coldstart),
+        "coldstart_simulated": _clean_for_json(coldstart_sim),
         "two_stage": _clean_for_json(two_stage),
         "semantic": _clean_for_json(semantic),
         "diversity": _clean_for_json(diversity),
@@ -553,6 +633,7 @@ def main() -> None:
                                     val_rel, test_rel, item_pop, item_feats)
     latency = run_part_c(movies, splits, user_train_items)
     coldstart = run_part_d(movies, splits, user_train_items, test_rel, item_pop, item_feats)
+    coldstart_sim = run_part_d2(movies, splits, test_rel, item_pop, item_feats)
     two_stage = run_two_stage_benchmark(movies, splits, user_train_items, test_rel)
     semantic = run_semantic_benchmark(movies, k=K)
     diversity = run_diversity_and_explanation_benchmark(movies, splits, user_train_items, test_rel, item_pop, item_feats, k=K)
@@ -561,7 +642,7 @@ def main() -> None:
     print("\n" + "=" * 72)
     print("GENERATING COMPREHENSIVE BENCHMARK REPORT")
     print("=" * 72)
-    generate_report(quality, abl_val, abl_test, latency, coldstart, two_stage, semantic, diversity, data_stats)
+    generate_report(quality, abl_val, abl_test, latency, coldstart, coldstart_sim, two_stage, semantic, diversity, data_stats)
 
     elapsed = time.time() - total_t0
     print(f"\n[OK] Total benchmark time: {elapsed:.1f}s")

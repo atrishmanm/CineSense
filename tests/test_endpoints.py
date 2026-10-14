@@ -5,7 +5,7 @@ import time
 
 BASE = "http://localhost:5000"
 
-def test_endpoint(name, url, method="GET", data=None, expect_html=False):
+def check_endpoint(name, url, method="GET", data=None, expect_html=False):
     print(f"\n{'='*50}")
     print(f"Testing: {name}")
     print(f"URL: {url}")
@@ -59,26 +59,31 @@ def test_endpoint(name, url, method="GET", data=None, expect_html=False):
         print(f"Error: {e}")
         print("FAIL")
 
-# Test 1: Home page loads
-test_endpoint("Home Page", f"{BASE}/", expect_html=True)
+def main():
+    # Test 1: Home page loads
+    check_endpoint("Home Page", f"{BASE}/", expect_html=True)
 
-# Test 2: Trending
-test_endpoint("Trending API", f"{BASE}/api/trending")
+    # Test 2: Trending
+    check_endpoint("Trending API", f"{BASE}/api/trending")
 
-# Test 3: Chat
-test_endpoint("Chat API", f"{BASE}/api/chat", data={"message": "recommend me a good sci-fi movie"})
+    # Test 3: Chat
+    check_endpoint("Chat API", f"{BASE}/api/chat", data={"message": "recommend me a good sci-fi movie"})
 
-# Test 4: Mood Recommendations
-test_endpoint("Mood API", f"{BASE}/api/mood-recommendations", data={"mood": "happy", "user_id": 1})
+    # Test 4: Mood Recommendations
+    check_endpoint("Mood API", f"{BASE}/api/mood-recommendations", data={"mood": "happy", "user_id": 1})
 
-# Test 5: Chat UI page
-test_endpoint("Chat UI Page", f"{BASE}/chat-ui", expect_html=True)
+    # Test 5: Chat UI page
+    check_endpoint("Chat UI Page", f"{BASE}/chat-ui", expect_html=True)
 
-# Test 6: Friends page (will redirect to login)
-test_endpoint("Friends/Login Page", f"{BASE}/friends", expect_html=True)
+    # Test 6: Friends page (will redirect to login)
+    check_endpoint("Friends/Login Page", f"{BASE}/friends", expect_html=True)
 
-# Test 7: Features page
-test_endpoint("Features Page", f"{BASE}/features", expect_html=True)
+    # Test 7: Features page
+    check_endpoint("Features Page", f"{BASE}/features", expect_html=True)
 
-print(f"\n{'='*50}")
-print("All tests complete!")
+    print(f"\n{'='*50}")
+    print("All tests complete!")
+
+
+if __name__ == "__main__":
+    main()

@@ -138,6 +138,7 @@ benchmarks/results/
 # Trained model artifacts
 model/*.pt
 model/*.pth
+model/*.npz
 model/*.npy
 model/*.pkl
 model/*.json

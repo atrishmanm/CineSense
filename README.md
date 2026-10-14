@@ -1,88 +1,38 @@
-# CineSense — AI-Powered Movie Recommendation Platform
+# CineSense — AI Movie Recommendations
 
-**An intelligent movie recommendation system powered by deep learning, pairwise preference learning, and reinforcement learning — built with a fully normalized MySQL database and 100K+ movie records from TMDB and MovieLens datasets.**
+Pairwise-comparison recommender (Flask + MySQL 8.0 + PyTorch) on MovieLens + TMDB.
+Asks "which movie do you prefer?", learns ELO taste, serves hybrid neural + content picks.
 
----
+## Docs
 
-## Tech Stack
+- [Overview](docs/overview.md) — what it is, problems, objectives
+- [Architecture](docs/architecture.md) — system design, stack, modules
+- [Data & Methods](docs/methods.md) — datasets, pipeline, models
+- [Database & API](docs/database-api.md) — schema (28 tables, 24 views, 24 procedures, 8 functions, 11 triggers) + 55 `/api` endpoints
+- [Setup & Deployment](docs/setup.md) — install, run, deploy
+- [Test Results](docs/results.md) — reproduced benchmarks (popularity NDCG@10 0.094 beats hybrid 0.030; hybrid wins coverage 5.5×)
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Flask 3.0 (Python) |
-| Database | MySQL 8.0+ (3NF, 16 tables, 12 views, 8 stored procedures, 4 functions, 5 triggers) |
-| Deep Learning | PyTorch 2.1+ (NCF, Two-Tower, NeuMF ×13 ensemble) |
-| NLP / Embeddings | Sentence-Transformers (all-MiniLM-L6-v2, 384-dim) |
-| ML Libraries | NumPy, Scikit-learn, Pandas |
-| External API | TMDB API v3 |
-| Frontend | HTML5, CSS3, JavaScript, Jinja2 |
-| Deployment | Gunicorn + Render |
-
-## Key Features
-
-- **Pairwise Comparison** — "Which movie do you prefer?" interactions that learn user taste in real-time via ELO ratings (Bradley-Terry model)
-- **13-Model NeuMF Ensemble** — Neural Collaborative Filtering trained on MovieLens-100K (RMSE = 0.8932)
-- **Content-Based Filtering** — Sentence Transformer embeddings for cold-start handling
-- **Reinforcement Learning** — UCB Multi-Armed Bandit for exploration vs exploitation
-- **55-Dimension Feature Vectors** — 20 genre + 10 director + 20 actor + 5 metadata features
-- **Advanced DBMS Features** — 16 normalized tables, 12 analytical views, 8 stored procedures, 4 custom functions, 5 automated triggers, 19+ indexes
-- **Conversational AI** — DialoGPT-medium chatbot for natural language movie discovery
-- **Mood-Based Recommendations** — 7-emotion detection that maps mood to genres
-- **Social Features** — Friends, watch parties, and collaborative movie lists
-- **Visual Search** — Find movies by uploading poster images (CLIP)
-- **A/B Testing** — Statistical experiment framework for recommendation strategies
-- **Redis Caching** — 96% faster responses with TTL-based cache
-
-## Setup
+## Quick start
 
 ```bash
-# Clone & install
-git clone https://github.com/your-repo/CineSense.git
-cd CineSense
 pip install -r requirements.txt
-
-# Configure .env
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=cinesense
-TMDB_API_KEY=your_tmdb_api_key
-
-# Initialize database & train models
-mysql -u root -p < database/schema.sql
-python database/run_migration.py
-python scripts/update_schema.py  # optional: adds social features tables
-python scripts/fetch_tmdb_data.py
-python run_pipeline.py
-
-# Run (full-featured app)
-python app_integrated.py
+cp .env.example .env   # set DB_* + TMDB_API_KEY
+mysql -u root -p cinesense < database/schema.sql
+python app_integrated.py   # → http://localhost:5000
 ```
 
-App runs at `http://localhost:5000`.
+## Key numbers (reproduced, not claimed)
 
-| Page | URL |
-|------|-----|
-| Home | `http://localhost:5000/` |
-| Chat AI | `http://localhost:5000/chat-ui` |
-| Features | `http://localhost:5000/features` |
-| Social | `http://localhost:5000/friends` |
-| Compare | `http://localhost:5000/compare` |
+| Item | Value |
+|------|-------|
+| Benchmark harness | `python benchmarks/run_all_benchmarks.py` — temporal split, full catalog, bootstrap CIs |
+| Best local ranker | Popularity NDCG@10 0.094 / Hit@10 0.40 (hybrid: 0.030 / 0.20, 5.5× coverage) |
+| Offline torch (32M, Kaggle) | Raw RMSE 0.768, ROC-AUC 0.836 — research artifact, not in serving path |
+| Serving | 300-candidate funnel → top 20, retrieval p95 ~6ms |
+| Tests | 76 tests, DB-free subset 19 passed / 2 skipped |
 
-## Documentation
-
-See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for comprehensive details on:
-- System architecture and AI/ML pipeline
-- Database schema and DBMS features (views, stored procedures, triggers, functions)
-- Module-wise file descriptions
-- API endpoints and frontend pages
-- Dataset information and deployment guide
-
-Database note: `database/schema.sql` is the single authoritative core schema file.
+Torch checkpoints are offline-only (`USE_DL_SCORING=0` by default).
 
 ## References
 
-- [MovieLens Dataset — GroupLens](https://grouplens.org/datasets/movielens/)
-- [TMDB API](https://developer.themoviedb.org/docs)
-- [Neural Collaborative Filtering (He et al., 2017)](https://arxiv.org/abs/1708.05031)
-- [Sentence-BERT (Reimers & Gurevych, 2019)](https://arxiv.org/abs/1908.10084)
+- [MovieLens](https://grouplens.org/datasets/movielens/) · [TMDB API](https://developer.themoviedb.org/docs) · [NCF (He et al., 2017)](https://arxiv.org/abs/1708.05031) · [Sentence-BERT](https://arxiv.org/abs/1908.10084)
