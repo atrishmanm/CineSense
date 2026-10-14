@@ -7,68 +7,73 @@
   "hardware": "2x GPUs (DataParallel)",
   "best_epoch": 3,
   "rmse_target_achieved": true,
-  "offline_artifact_note": "Kaggle training artifact (not wired into the Flask app; DL scoring is OFF by default). Rating metrics are held-out; ranking metrics below use a sampled protocol (550 users, 500 sampled candidates) — see evaluation_caveat. Do not compare ranking numbers to full-catalog benchmarks.",
-  "evaluation_caveat": "ranking_500_users evaluated first 550 test users against first 500 unseen items among first 3000 item indices (sampled, not full catalog).",
   "normalized_regression": {
-    "rmse": 0.1706,
-    "mae": 0.128,
-    "mse": 0.0291,
-    "r2": 0.4746
+    "rmse": 0.1711,
+    "mae": 0.1286,
+    "mse": 0.0293,
+    "r2": 0.4715
   },
   "raw_regression": {
-    "rmse": 0.7678,
-    "mae": 0.5761,
-    "mse": 0.5895,
-    "r2": 0.4746,
-    "pearson_r": 0.6898
+    "rmse": 0.77,
+    "mae": 0.5786,
+    "mse": 0.5929,
+    "r2": 0.4715,
+    "pearson_r": 0.6884
   },
   "classification_threshold_4_0": {
-    "accuracy": 0.7071,
-    "precision": 0.8544,
-    "recall": 0.4969,
-    "f1_score": 0.6283,
-    "specificity": 0.9159,
-    "balanced_accuracy": 0.7064,
-    "roc_auc": 0.8355,
-    "pr_auc": 0.8282,
-    "mcc": 0.4549
+    "accuracy": 0.7024,
+    "precision": 0.8567,
+    "recall": 0.4837,
+    "f1_score": 0.6183,
+    "specificity": 0.9197,
+    "balanced_accuracy": 0.7017,
+    "roc_auc": 0.8352,
+    "pr_auc": 0.8274,
+    "mcc": 0.4485
   },
   "ranking_500_users": {
     "evaluated_users": 550,
-    "ndcg@10": 0.0753,
-    "hit_rate@10": 0.3403,
-    "precision@10": 0.0504,
-    "recall@10": 0.0768
+    "ndcg@10": 0.0777,
+    "hit_rate@10": 0.3346,
+    "precision@10": 0.0511,
+    "recall@10": 0.0737
   },
   "beyond_accuracy": {
-    "catalog_coverage@10": 0.0045,
-    "novelty_entropy@10": 10.3732
+    "catalog_coverage@10": 0.0048,
+    "novelty_entropy@10": 10.2766
   },
   "training_history": [
     {
       "epoch": 1,
-      "train_norm_rmse": 0.16762602505054516,
-      "val_norm_rmse": 0.1756713009883812
+      "train_norm_rmse": 0.16722984721478315,
+      "val_norm_rmse": 0.17564475583881936
     },
     {
       "epoch": 2,
-      "train_norm_rmse": 0.15457905859262103,
-      "val_norm_rmse": 0.17104440462097506
+      "train_norm_rmse": 0.1546018185998926,
+      "val_norm_rmse": 0.17119002457534485
     },
     {
       "epoch": 3,
-      "train_norm_rmse": 0.14519023594170136,
-      "val_norm_rmse": 0.17069288166502616
+      "train_norm_rmse": 0.14543571262856642,
+      "val_norm_rmse": 0.17114257841744016
     },
     {
       "epoch": 4,
-      "train_norm_rmse": 0.13748617634798782,
-      "val_norm_rmse": 0.1725153806106704
+      "train_norm_rmse": 0.13778651201483888,
+      "val_norm_rmse": 0.1725729264810701
     },
     {
       "epoch": 5,
-      "train_norm_rmse": 0.13195434418847524,
-      "val_norm_rmse": 0.1748914665884298
+      "train_norm_rmse": 0.13224855780016123,
+      "val_norm_rmse": 0.1748855038543091
     }
-  ]
+  ],
+  "offline_artifact_note": "Kaggle Dual-T4 training artifact, rerun 2026-10-14 (kernel v5). Not wired into the Flask app; DL scoring is OFF by default. Rating metrics are held-out; ranking metrics use a sampled protocol - see evaluation_caveat.",
+  "evaluation_caveat": "ranking_500_users evaluated first 550 test users against first 500 unseen items among first 3000 item indices (sampled, not full catalog).",
+  "provenance": {
+    "run_date": "2026-10-14",
+    "kernel": "atrishmanmukherjee/cinesense-t4x2-deep-recommendation-training v5",
+    "log": "cinesense-t4x2-deep-recommendation-training.log"
+  }
 }

@@ -69,15 +69,15 @@ embeddings are untested in this harness.
 | Artifact | Raw RMSE | ROC-AUC | Note |
 |----------|---------|--------|------|
 | `models/kaggle_t4x2` (100K Deep V2) | 0.949 | 0.774 | no local trainer reproduces it; use `training/train_100k.py` for reproducible 100K numbers |
-| `models/kaggle_t4x2_full32m` (Deep V3) | 0.768 | 0.836 | 32M ratings; held-out rating metrics plausible, ranking used a sampled protocol |
+| `models/kaggle_t4x2_full32m` (Deep V3) | 0.77 | 0.8352 | 32M ratings; rerun 2026-10-14 on Kaggle Dual T4 (kernel v5, log kept) — reproduces prior 0.7678/0.8355 within noise; ranking used a sampled protocol |
 | `models/kaggle_t4x2_3m_subset` (Deep V3) | 0.801 | 0.823 | 3M-rating subset, formerly mislabeled "32M" |
 
 DL scoring is OFF by default (`USE_DL_SCORING=0`); these are research
 artifacts. Load check (Oct 2026, torch 2.10): the full-32M checkpoint loads
 into `training/deep_v3.py:CineSenseDeepV3Full32M` with **0 missing /
-0 unexpected keys** and a sane forward pass — the class/checkpoint match is
-verified, only the Kaggle rerun metrics are pending. Rerun on Kaggle and keep
-the log before citing them.
+0 unexpected keys** and a sane forward pass. The 32M metrics were reproduced
+by a fresh Kaggle rerun (2026-10-14, raw RMSE 0.77 vs prior 0.7678) with the
+log kept in `models/kaggle_t4x2_full32m/`.
 
 ## 7. Reproducible local training
 
@@ -90,9 +90,9 @@ pytest -q                                   # unit/integration (DB-free subset p
 
 ## 8. Test suite
 
-`pytest.ini` collects 6 files (~55 tests in scope), 76 total across `tests/`.
+`pytest.ini` collects 6 files (**60 tests** in scope), **75 test functions** total across `tests/`.
 DB-free subset (`test_pairwise`, `test_reinforcement`, `test_dependencies`):
 19 passed, 2 skipped (Oct 2026). `test_ai_comprehensive` / `test_features`
-contain assertion-free checks — treat as smoke tests, not proof.
+(16 tests) need a live server and skip otherwise — 7/7 passed live Oct 2026.
 
 [<- Back to README](../README.md)

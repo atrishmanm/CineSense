@@ -267,7 +267,7 @@ class TrendingDetector:
         try:
             # Get genre ID
             genre_data = self.db.query("""
-                SELECT genre_id FROM genres WHERE name = %s
+                SELECT genre_id FROM genres WHERE genre_name = %s
             """, (genre,))
             
             if not genre_data:

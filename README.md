@@ -11,6 +11,7 @@ Asks "which movie do you prefer?", learns ELO taste, serves hybrid neural + cont
 - [Database & API](docs/database-api.md) — schema (28 tables, 24 views, 24 procedures, 8 functions, 11 triggers) + 55 `/api` endpoints
 - [Setup & Deployment](docs/setup.md) — install, run, deploy
 - [Test Results](docs/results.md) — reproduced benchmarks (popularity NDCG@10 0.094 beats hybrid 0.030; hybrid wins coverage 5.5×)
+- [Full Audit](docs/AUDIT.md) — 651 findings with file:line (bugs, inconsistencies, robustness)
 
 ## Quick start
 
@@ -27,9 +28,9 @@ python app_integrated.py   # → http://localhost:5000
 |------|-------|
 | Benchmark harness | `python benchmarks/run_all_benchmarks.py` — temporal split, full catalog, bootstrap CIs |
 | Best local ranker | Popularity NDCG@10 0.094 / Hit@10 0.40 (hybrid: 0.030 / 0.20, 5.5× coverage) |
-| Offline torch (32M, Kaggle) | Raw RMSE 0.768, ROC-AUC 0.836 — research artifact, not in serving path |
+| Offline torch (32M, Kaggle rerun 2026-10-14) | Raw RMSE 0.77, ROC-AUC 0.8352 — research artifact, not in serving path |
 | Serving | 300-candidate funnel → top 20, retrieval p95 ~6ms |
-| Tests | 76 tests, DB-free subset 19 passed / 2 skipped |
+| Tests | 75 tests (60 in default scope), 7/7 live-server tests passed |
 
 Torch checkpoints are offline-only (`USE_DL_SCORING=0` by default).
 

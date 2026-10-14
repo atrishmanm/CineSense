@@ -146,7 +146,9 @@ def main():
     print("=" * 70)
     
     # Test server first
-    if not test_server():
+    try:
+        test_server()
+    except Exception:
         print("\n❌ Server not running. Start with: python app_integrated.py")
         return
     

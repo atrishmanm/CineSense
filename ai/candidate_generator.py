@@ -259,7 +259,7 @@ class CandidateGenerator:
             LIMIT 5
             """
             
-            results = self.db.execute_query(query, (user_id,))
+            results = self.db.query(query, (user_id,))
             
             if results:
                 return [row['genre_id'] for row in results]
@@ -324,7 +324,7 @@ class CandidateGenerator:
                 LIMIT %s
                 """
                 
-                results = self.db.execute_query(query, (user_id, count // 2))
+                results = self.db.query(query, (user_id, count // 2))
                 
                 if results:
                     known_movies = [dict(row) for row in results]
