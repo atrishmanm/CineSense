@@ -1,5 +1,5 @@
 """
-CineSense - Fully Integrated Flask Application
+CineSense - Fully Integrated CineSense Application with Advanced Social Features - v1.1
 AI-Based Movie Recommendation Platform with ALL Features
 """
 
@@ -766,7 +766,7 @@ def main():
         host='0.0.0.0',
         port=Config.PORT,
         debug=Config.DEBUG,
-        use_reloader=False  # Disable auto-reloader to prevent constant restarts
+        use_reloader=True
     )
 
 

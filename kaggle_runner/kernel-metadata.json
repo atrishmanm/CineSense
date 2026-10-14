@@ -1,0 +1,13 @@
+{
+  "id": "atrishmanmukherjee/cinesense-t4x2-deep-recommendation-training",
+  "title": "CineSense T4x2 Deep Recommendation Training",
+  "code_file": "train_kaggle_t4x2.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "justsahil/movielens-32m"
+  ]
+}

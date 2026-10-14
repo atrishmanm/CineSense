@@ -1,0 +1,248 @@
+"""
+Four self-contained recommendation strategies for benchmarking.
+
+Each strategy operates on in-memory MovieLens-100K data -- no MySQL, no
+Redis, no external API.  This guarantees reproducibility and lets the
+benchmark run on any machine.
+
+Strategies
+----------
+A. **Popularity** -- rank items by number of positive ratings.
+B. **Content** -- cosine similarity between user genre profile and item
+   genre vector.
+C. **Preference + ELO** -- ELO scores derived from pairwise comparisons
+   simulated from explicit ratings, combined with a per-user preference
+   accumulator.
+D. **Hybrid** -- weighted combination of A, B, and C with configurable
+   weights (default 50 / 30 / 20).
+"""
+
+from __future__ import annotations
+
+import random
+from collections import Counter, defaultdict
+from typing import Dict, List, Set
+
+import numpy as np
+
+from benchmarks.data_loader import Movie, Rating
+
+
+# -- Base class ------------------------------------------------------
+
+class BaseRecommender:
+    """Common interface for all recommenders."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    # subclass must implement
+    def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
+        raise NotImplementedError
+
+    def score_item(self, user_id: int, item_id: int) -> float:
+        raise NotImplementedError
+
+    # default top-K selection
+    def recommend(self, user_id: int, k: int, candidates: Set[int]) -> List[int]:
+        scored = [(it, self.score_item(user_id, it)) for it in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [it for it, _ in scored[:k]]
+
+    def recommend_all(
+        self,
+        eval_users: Set[int],
+        k: int,
+        user_train_items: Dict[int, Set[int]],
+        catalog: Set[int],
+    ) -> Dict[int, List[int]]:
+        recs: Dict[int, List[int]] = {}
+        for uid in eval_users:
+            cands = catalog - user_train_items.get(uid, set())
+            if cands:
+                recs[uid] = self.recommend(uid, k, cands)
+        return recs
+
+
+# -- A. Popularity baseline -----------------------------------------
+
+class PopularityRecommender(BaseRecommender):
+    """Rank by count of positive ratings, then by average rating."""
+
+    def __init__(self, relevance_threshold: float = 4.0) -> None:
+        super().__init__("Popularity")
+        self.threshold = relevance_threshold
+        self._scores: Dict[int, tuple] = {}
+
+    def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
+        pos_counts: Counter = Counter()
+        all_ratings: Dict[int, list] = defaultdict(list)
+
+        for r in train_ratings:
+            all_ratings[r.item_id].append(r.rating)
+            if r.rating >= self.threshold:
+                pos_counts[r.item_id] += 1
+
+        for iid, rlist in all_ratings.items():
+            self._scores[iid] = (pos_counts[iid], float(np.mean(rlist)), len(rlist))
+
+    def score_item(self, user_id: int, item_id: int) -> float:
+        s = self._scores.get(item_id, (0, 0.0, 0))
+        # encode as a single float for sorting
+        return s[0] * 100 + s[1] * 10 + s[2] * 0.001
+
+
+# -- B. Content-based (genre cosine similarity) ---------------------
+
+class ContentRecommender(BaseRecommender):
+    """User profile = weighted-average genre vector of liked items.
+
+    Candidates are ranked by cosine similarity to this profile.
+    """
+
+    def __init__(self, relevance_threshold: float = 4.0) -> None:
+        super().__init__("Content")
+        self.threshold = relevance_threshold
+        self.user_profiles: Dict[int, np.ndarray] = {}
+        self.item_vectors: Dict[int, np.ndarray] = {}
+
+    def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
+        for mid, m in movies.items():
+            self.item_vectors[mid] = m.genres.copy()
+
+        liked: Dict[int, list] = defaultdict(list)
+        for r in train_ratings:
+            if r.rating >= self.threshold and r.item_id in self.item_vectors:
+                liked[r.user_id].append((r.item_id, r.rating))
+
+        for uid, pairs in liked.items():
+            vecs = np.array([self.item_vectors[iid] for iid, _ in pairs])
+            wts = np.array([rat for _, rat in pairs])
+            self.user_profiles[uid] = np.average(vecs, axis=0, weights=wts)
+
+    def _cosine(self, a: np.ndarray, b: np.ndarray) -> float:
+        na, nb = np.linalg.norm(a), np.linalg.norm(b)
+        if na == 0 or nb == 0:
+            return 0.0
+        return float(np.dot(a, b) / (na * nb))
+
+    def score_item(self, user_id: int, item_id: int) -> float:
+        prof = self.user_profiles.get(user_id)
+        vec = self.item_vectors.get(item_id)
+        if prof is None or vec is None:
+            return 0.0
+        return self._cosine(prof, vec)
+
+
+# -- C. Preference + ELO --------------------------------------------
+
+class PreferenceEloRecommender(BaseRecommender):
+    """Simulate pairwise comparisons from explicit ratings, maintain
+    global ELO scores *and* per-user preference accumulators.
+
+    The ELO update uses the standard Bradley-Terry expected-score
+    formula; the preference accumulator simply tracks net "wins" for
+    each item per user.
+    """
+
+    def __init__(
+        self,
+        k_factor: float = 32.0,
+        initial_elo: float = 1500.0,
+        relevance_threshold: float = 4.0,
+    ) -> None:
+        super().__init__("Preference+ELO")
+        self.k_factor = k_factor
+        self.initial_elo = initial_elo
+        self.threshold = relevance_threshold
+        self.global_elo: Dict[int, float] = {}
+        self.user_pref: Dict[int, Dict[int, float]] = {}
+        self._elo_min = float("inf")
+        self._elo_max = float("-inf")
+
+    @staticmethod
+    def _expected(ra: float, rb: float) -> float:
+        return 1.0 / (1.0 + 10.0 ** ((rb - ra) / 400.0))
+
+    def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
+        items = {r.item_id for r in train_ratings}
+        for it in items:
+            self.global_elo[it] = self.initial_elo
+
+        user_ratings: Dict[int, List[Rating]] = defaultdict(list)
+        for r in train_ratings:
+            user_ratings[r.user_id].append(r)
+
+        for uid, u_rats in user_ratings.items():
+            self.user_pref[uid] = {}
+            desc = sorted(u_rats, key=lambda r: r.rating, reverse=True)
+
+            # generate pairwise comparisons from consecutive-rating windows
+            for i in range(len(desc)):
+                for j in range(i + 1, min(i + 5, len(desc))):
+                    if desc[i].rating <= desc[j].rating:
+                        continue
+                    w, l = desc[i].item_id, desc[j].item_id
+                    we, le = self.global_elo[w], self.global_elo[l]
+                    exp_w = self._expected(we, le)
+                    self.global_elo[w] = we + self.k_factor * (1.0 - exp_w)
+                    self.global_elo[l] = le + self.k_factor * (0.0 - (1.0 - exp_w))
+                    self.user_pref[uid][w] = self.user_pref[uid].get(w, 0.0) + 0.1
+                    self.user_pref[uid][l] = self.user_pref[uid].get(l, 0.0) - 0.1
+
+        if self.global_elo:
+            self._elo_min = min(self.global_elo.values())
+            self._elo_max = max(self.global_elo.values())
+
+    def _norm_elo(self, elo: float) -> float:
+        span = self._elo_max - self._elo_min
+        if span <= 0:
+            return 0.5
+        return (elo - self._elo_min) / span
+
+    def score_item(self, user_id: int, item_id: int) -> float:
+        elo = self._norm_elo(self.global_elo.get(item_id, self.initial_elo))
+        pref = self.user_pref.get(user_id, {}).get(item_id, 0.0)
+        pref_norm = 1.0 / (1.0 + np.exp(-5.0 * pref))  # sigmoid
+        return 0.6 * elo + 0.4 * pref_norm
+
+
+# -- D. Hybrid (configurable weights) ------------------------------
+
+class HybridRecommender(BaseRecommender):
+    """Weighted combination of Content, Preference, and ELO signals.
+
+    Default weights mirror the production configuration:
+    content 50 %, preference 30 %, ELO 20 %.
+    """
+
+    def __init__(
+        self,
+        w_content: float = 0.50,
+        w_preference: float = 0.30,
+        w_elo: float = 0.20,
+        relevance_threshold: float = 4.0,
+        name: str | None = None,
+    ) -> None:
+        label = name or f"Hybrid({w_content:.0%}/{w_preference:.0%}/{w_elo:.0%})"
+        super().__init__(label)
+        self.w_content = w_content
+        self.w_preference = w_preference
+        self.w_elo = w_elo
+
+        self._content = ContentRecommender(relevance_threshold)
+        self._pref_elo = PreferenceEloRecommender(relevance_threshold=relevance_threshold)
+
+    def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
+        self._content.fit(train_ratings, movies)
+        self._pref_elo.fit(train_ratings, movies)
+
+    def score_item(self, user_id: int, item_id: int) -> float:
+        c = self._content.score_item(user_id, item_id)
+        elo = self._pref_elo._norm_elo(
+            self._pref_elo.global_elo.get(item_id, self._pref_elo.initial_elo)
+        )
+        pref_raw = self._pref_elo.user_pref.get(user_id, {}).get(item_id, 0.0)
+        pref = 1.0 / (1.0 + np.exp(-5.0 * pref_raw))
+
+        return self.w_content * c + self.w_preference * pref + self.w_elo * elo

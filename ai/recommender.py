@@ -380,83 +380,103 @@ class CineSenseRecommender:
                 logger.info(f"User {user_id} has insufficient data, returning popular movies")
                 return db.get_top_movies(limit=n, order_by='popularity')
             
-            # Get user embedding
-            user_embedding = self._get_user_embedding(user_id)
-            user_vector = user_embedding.get_embedding()
-            
-            # Build user genre profile for DL scoring (if available)
-            user_genre_vec = self._build_user_genre_vec(interactions) if self.dl_scorer else None
-            
-            # Get all movies
-            all_movies = db.get_top_movies(limit=500, order_by='elo_score')
-            
             # Get movies user has already interacted with
             interactions = db.get_user_interactions(user_id, limit=100)
             seen_movie_ids = set()
             for interaction in interactions:
                 seen_movie_ids.add(interaction['movie_1_id'])
                 seen_movie_ids.add(interaction['movie_2_id'])
-                # Also add the chosen movie specifically
                 if interaction.get('chosen_movie_id'):
                     seen_movie_ids.add(interaction['chosen_movie_id'])
-            
+
+            # Build user genre profile for DL scoring (if available)
+            user_genre_vec = self._build_user_genre_vec(interactions) if self.dl_scorer else None
+
+            # Get user embedding
+            user_embedding = self._get_user_embedding(user_id)
+            user_vector = user_embedding.get_embedding()
+
+            # Get candidate movies
+            all_movies = db.get_top_movies(limit=500, order_by='elo_score')
+
+            # Score weights (sum to exactly 1.0)
+            if self.dl_scorer and user_genre_vec is not None:
+                dl_w = float(getattr(Config, 'DL_SCORE_WEIGHT', 0.15))
+                w_content = (1.0 - dl_w) * 0.50
+                w_pref = (1.0 - dl_w) * 0.30
+                w_elo = (1.0 - dl_w) * 0.20
+                w_dl = dl_w
+            else:
+                w_content, w_pref, w_elo, w_dl = 0.50, 0.30, 0.20, 0.0
+
             # Score each movie
             movie_scores = []
-            
+            u_norm = float(np.linalg.norm(user_vector))
+
             for movie in all_movies:
                 movie_id = movie['movie_id']
-                
-                # Skip seen movies
                 if movie_id in seen_movie_ids:
                     continue
-                
-                # Get movie embedding
+
+                # 1. Content-based score: normalized cosine similarity [0, 1]
                 movie_embedding = self._movie_to_embedding(movie)
-                
-                # Calculate combined score
-                # 1. Content-based score (embedding similarity)
-                content_score = np.dot(user_vector, movie_embedding)
-                
-                # 2. Preference score from pairwise learning
-                preference_score = user_model.get_preference_score(movie_id)
-                
-                # 3. Global quality (ELO score, normalized)
-                elo_score = movie.get('elo_score', 1500) / 3000  # Normalize to ~0-1
-                
-                # 4. DL genre affinity (learned from NeuMF ensemble)
-                dl_score = 0.0
+                m_norm = float(np.linalg.norm(movie_embedding))
+                if u_norm > 0 and m_norm > 0:
+                    cosine = float(np.dot(user_vector, movie_embedding) / (u_norm * m_norm))
+                    norm_content_score = max(0.0, min(1.0, (cosine + 1.0) / 2.0))
+                else:
+                    norm_content_score = 0.5
+
+                # 2. Preference score: sigmoid-normalized to [0, 1]
+                raw_pref = user_model.get_preference_score(movie_id)
+                norm_preference_score = float(1.0 / (1.0 + np.exp(-5.0 * raw_pref)))
+
+                # 3. Global quality: ELO normalized to [0, 1]
+                raw_elo = float(movie.get('elo_score', Config.INITIAL_ELO_SCORE))
+                norm_elo_score = max(0.0, min(1.0, (raw_elo - 1000.0) / 1000.0))
+
+                # 4. Optional DL genre affinity: [0, 1]
+                norm_dl_score = 0.0
                 if self.dl_scorer and user_genre_vec is not None:
-                    movie_genre_vec = self.dl_scorer.tmdb_genre_to_vec(
-                        movie.get('genres', ''))
-                    dl_score = self.dl_scorer.genre_affinity_score(
-                        user_genre_vec, movie_genre_vec)
-                
-                # Combine scores (weighted average)
-                dl_w = Config.DL_SCORE_WEIGHT if self.dl_scorer else 0.0
-                remaining = 1.0 - dl_w
+                    try:
+                        movie_genre_vec = self.dl_scorer.tmdb_genre_to_vec(movie.get('genres', ''))
+                        norm_dl_score = max(0.0, min(1.0, float(self.dl_scorer.genre_affinity_score(user_genre_vec, movie_genre_vec))))
+                    except Exception as dl_err:
+                        logger.warning(f"DL scoring error for movie {movie_id}: {dl_err}")
+                        norm_dl_score = 0.0
+
+                # Strictly weighted linear combination (weights sum to 1.0)
                 final_score = (
-                    remaining * 0.5 / 0.85 * content_score +   # ~50% of remaining
-                    remaining * 0.3 / 0.85 * preference_score + # ~30% of remaining
-                    remaining * 0.2 / 0.85 * elo_score +        # ~20% of remaining (sums to remaining * 1.0/0.85 ≈ remaining when ~0.85)
-                    dl_w * dl_score
-                ) if dl_w > 0 else (
-                    0.5 * content_score +
-                    0.3 * preference_score +
-                    0.2 * elo_score
+                    w_content * norm_content_score +
+                    w_pref * norm_preference_score +
+                    w_elo * norm_elo_score +
+                    w_dl * norm_dl_score
                 )
-                
+
+                # Traceable component explanation payload
+                explanation_payload = {
+                    "content_similarity_contribution": round(w_content * norm_content_score, 4),
+                    "preference_elo_contribution": round(w_pref * norm_preference_score + w_elo * norm_elo_score, 4),
+                    "dl_contribution": round(w_dl * norm_dl_score, 4) if w_dl > 0 else 0.0,
+                    "content_score": round(norm_content_score, 4),
+                    "preference_score": round(norm_preference_score, 4),
+                    "elo_score": round(norm_elo_score, 4),
+                    "matched_genres": movie.get("genres", ""),
+                    "reason": f"Matches preferred profile ({norm_content_score:.0%}) with community ELO {raw_elo:.0f}"
+                }
+
                 movie_scores.append({
                     **movie,
                     'recommendation_score': final_score,
-                    'content_score': content_score,
-                    'preference_score': preference_score,
-                    'elo_score': elo_score,
-                    'dl_genre_affinity': dl_score
+                    'content_score': norm_content_score,
+                    'preference_score': norm_preference_score,
+                    'elo_score': norm_elo_score,
+                    'dl_genre_affinity': norm_dl_score,
+                    'explanation_payload': explanation_payload,
                 })
-            
+
             # Sort by final score
             movie_scores.sort(key=lambda x: x['recommendation_score'], reverse=True)
-            
             return movie_scores[:n]
             
         except Exception as e:
@@ -464,6 +484,78 @@ class CineSenseRecommender:
             # Fallback to popular movies
             return db.get_top_movies(limit=n, order_by='popularity')
     
+    def apply_diversity_rerank(self, ranked_items, top_n=20, lambda_diversity=0.3):
+        """
+        Maximal Marginal Relevance (MMR) diversity reranking.
+        Balances item relevance score with pairwise dissimilarity to already selected items.
+
+        MMR(i) = (1 - lambda) * relevance_score(i) - lambda * max_{j in S} similarity(i, j)
+
+        Args:
+            ranked_items: List of movie dicts with 'recommendation_score'
+            top_n: Number of diverse items to select
+            lambda_diversity: Tradeoff parameter (0.0 = pure relevance, 1.0 = maximum diversity)
+
+        Returns:
+            List of top_n reranked movie dicts with updated 'diversity_penalty' and 'mmr_score'
+        """
+        if not ranked_items or top_n <= 0:
+            return []
+
+        if lambda_diversity <= 0.0 or len(ranked_items) <= 1:
+            return ranked_items[:top_n]
+
+        # Extract or precompute genre sets for similarity
+        def _get_genre_set(m):
+            raw = m.get('genres', '')
+            if isinstance(raw, str):
+                return {g.strip().lower() for g in raw.split(',') if g.strip()}
+            elif isinstance(raw, (list, set)):
+                return {str(g).strip().lower() for g in raw if str(g).strip()}
+            return set()
+
+        genre_cache = {idx: _get_genre_set(item) for idx, item in enumerate(ranked_items)}
+
+        def _jaccard_sim(idx_a, idx_b):
+            set_a, set_b = genre_cache[idx_a], genre_cache[idx_b]
+            if not set_a and not set_b:
+                return 0.5
+            union_len = len(set_a | set_b)
+            return len(set_a & set_b) / union_len if union_len > 0 else 0.0
+
+        unselected = list(range(len(ranked_items)))
+        selected_indices = []
+
+        # Select first item (purely highest score)
+        best_first = max(unselected, key=lambda idx: ranked_items[idx].get('recommendation_score', 0.0))
+        selected_indices.append(best_first)
+        unselected.remove(best_first)
+
+        # Greedily select remaining items using MMR formula
+        while unselected and len(selected_indices) < top_n:
+            best_idx = None
+            best_mmr = float('-inf')
+
+            for cand_idx in unselected:
+                rel = float(ranked_items[cand_idx].get('recommendation_score', 0.0))
+                max_sim = max(_jaccard_sim(cand_idx, sel_idx) for sel_idx in selected_indices)
+                mmr_val = (1.0 - lambda_diversity) * rel - lambda_diversity * max_sim
+
+                if mmr_val > best_mmr:
+                    best_mmr = mmr_val
+                    best_idx = cand_idx
+
+            if best_idx is not None:
+                item = ranked_items[best_idx]
+                item['mmr_score'] = round(best_mmr, 4)
+                item['diversity_penalty'] = round(lambda_diversity * max(_jaccard_sim(best_idx, s) for s in selected_indices), 4)
+                selected_indices.append(best_idx)
+                unselected.remove(best_idx)
+            else:
+                break
+
+        return [ranked_items[i] for i in selected_indices]
+
     def get_featured_movie(self, user_id=None):
         """
         Get a featured movie for the hero banner

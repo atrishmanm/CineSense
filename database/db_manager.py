@@ -162,16 +162,32 @@ class DatabaseManager:
             return [row['genre_name'] for row in rows] if rows else []
     
     def get_random_movies(self, limit=10, min_popularity=0):
-        """Get random movies for comparison"""
-        query = """
-            SELECT * FROM movies 
+        """Get random movies for comparison (avoids full-table ORDER BY RAND())"""
+        # First get the count of eligible movies
+        count_query = """
+            SELECT COUNT(*) as cnt FROM movies
             WHERE popularity > %s AND tmdb_rating IS NOT NULL
-            ORDER BY RAND()
-            LIMIT %s
+        """
+        select_query = """
+            SELECT * FROM movies
+            WHERE popularity > %s AND tmdb_rating IS NOT NULL
+            LIMIT %s OFFSET %s
         """
         with self.get_cursor() as cursor:
-            cursor.execute(query, (min_popularity, limit))
-            return cursor.fetchall()
+            cursor.execute(count_query, (min_popularity,))
+            total = cursor.fetchone()['cnt']
+            if total == 0:
+                return []
+            # Collect distinct random offsets
+            import random as _rand
+            offsets = _rand.sample(range(total), min(limit, total))
+            results = []
+            for off in offsets:
+                cursor.execute(select_query, (min_popularity, 1, off))
+                row = cursor.fetchone()
+                if row:
+                    results.append(row)
+            return results
     
     def get_top_movies(self, limit=20, order_by='elo_score', offset=0, media_type='all'):
         """Get top rated movies with pagination support and media type filter"""

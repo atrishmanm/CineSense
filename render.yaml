@@ -5,10 +5,12 @@ services:
     runtime: python
     plan: free  # Explicitly use free plan
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 2 --timeout 120
+    startCommand: gunicorn "app_integrated:create_app()" --workers 2 --timeout 120
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.0
+        value: 3.11.0
+      - key: SECRET_KEY
+        generateValue: true
       - key: TMDB_API_KEY
         sync: false
       # Use external free database - add these manually in Render dashboard
@@ -22,3 +24,4 @@ services:
         sync: false
       - key: DB_PASSWORD
         sync: false
+

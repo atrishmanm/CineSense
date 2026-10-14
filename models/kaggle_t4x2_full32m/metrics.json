@@ -1,0 +1,72 @@
+{
+  "model_name": "CineSenseDeepV3_Full32M_DualT4",
+  "dataset": "MovieLens-32M",
+  "total_ratings_loaded": 32000204,
+  "unique_users": 200948,
+  "unique_items": 84432,
+  "hardware": "2x GPUs (DataParallel)",
+  "best_epoch": 3,
+  "rmse_target_achieved": true,
+  "normalized_regression": {
+    "rmse": 0.1706,
+    "mae": 0.128,
+    "mse": 0.0291,
+    "r2": 0.4746
+  },
+  "raw_regression": {
+    "rmse": 0.7678,
+    "mae": 0.5761,
+    "mse": 0.5895,
+    "r2": 0.4746,
+    "pearson_r": 0.6898
+  },
+  "classification_threshold_4_0": {
+    "accuracy": 0.7071,
+    "precision": 0.8544,
+    "recall": 0.4969,
+    "f1_score": 0.6283,
+    "specificity": 0.9159,
+    "balanced_accuracy": 0.7064,
+    "roc_auc": 0.8355,
+    "pr_auc": 0.8282,
+    "mcc": 0.4549
+  },
+  "ranking_500_users": {
+    "evaluated_users": 550,
+    "ndcg@10": 0.0753,
+    "hit_rate@10": 0.3403,
+    "precision@10": 0.0504,
+    "recall@10": 0.0768
+  },
+  "beyond_accuracy": {
+    "catalog_coverage@10": 0.0045,
+    "novelty_entropy@10": 10.3732
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_norm_rmse": 0.16762602505054516,
+      "val_norm_rmse": 0.1756713009883812
+    },
+    {
+      "epoch": 2,
+      "train_norm_rmse": 0.15457905859262103,
+      "val_norm_rmse": 0.17104440462097506
+    },
+    {
+      "epoch": 3,
+      "train_norm_rmse": 0.14519023594170136,
+      "val_norm_rmse": 0.17069288166502616
+    },
+    {
+      "epoch": 4,
+      "train_norm_rmse": 0.13748617634798782,
+      "val_norm_rmse": 0.1725153806106704
+    },
+    {
+      "epoch": 5,
+      "train_norm_rmse": 0.13195434418847524,
+      "val_norm_rmse": 0.1748914665884298
+    }
+  ]
+}

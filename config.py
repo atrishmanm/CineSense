@@ -1,4 +1,5 @@
 import os
+import secrets
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -6,8 +7,10 @@ load_dotenv()
 class Config:
     """Application configuration"""
     
-    # Flask
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Flask — generate a random key if SECRET_KEY env var is not set.
+    # NOTE: restarting the server invalidates all active sessions when
+    # this fallback is used.  In production always set SECRET_KEY.
+    SECRET_KEY = os.getenv('SECRET_KEY') or secrets.token_hex(32)
     PORT = int(os.getenv('PORT', 5000))
     DEBUG = os.getenv('FLASK_ENV') == 'development'
     
@@ -52,7 +55,7 @@ class Config:
     # Memory & Temporal Decay
     TEMPORAL_DECAY_FACTOR = 0.7  # Weight for recent interactions (0.7 recent + 0.3 past)
     INTERACTION_MEMORY_WINDOW = 50  # Keep last N interactions with full weight
-    LEARNING_TARGET_COMPARISONS = int(os.getenv('LEARNING_TARGET_COMPARISONS', INTERACTION_MEMORY_WINDOW))
+    LEARNING_TARGET_COMPARISONS = int(os.getenv('LEARNING_TARGET_COMPARISONS', '500'))
     
     # Model Paths
     MODEL_DIR = os.getenv('MODEL_DIR', './model')
@@ -113,4 +116,6 @@ class Config:
     DL_SCORE_WEIGHT = 0.15  # Weight of DL genre affinity in final score
     DL_V2_CHECKPOINT = os.getenv('DL_V2_CHECKPOINT', 'cinesense_v2.pt')  # Phase 2 ensemble (8 models)
     DL_V1_CHECKPOINT = os.getenv('DL_V1_CHECKPOINT', 'cinesense_model_final.pt')  # Phase 1 ensemble (5 models)
-    DL_ENSEMBLE_RMSE = 0.8932  # Best: Mega optimized
+    # NOTE: This RMSE was observed during training. Use benchmarks/run_all_benchmarks.py
+    # for verified, reproducible evaluation metrics on held-out test data.
+    DL_ENSEMBLE_RMSE = 0.8932  # Training-time metric — see benchmarks/ for held-out results

@@ -61,6 +61,18 @@
                             </svg>
                             <span id="watchlist-text">Add to Watchlist</span>
                         </button>
+                        <button onclick="openShareModal()" class="px-5 py-2.5 bg-purple-600/80 hover:bg-purple-600 backdrop-blur-sm rounded font-semibold text-sm md:text-base transition flex items-center border border-purple-500/50">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path>
+                            </svg>
+                            Share
+                        </button>
+                        <button onclick="openWatchPartyModal()" class="px-5 py-2.5 bg-pink-600/80 hover:bg-pink-600 backdrop-blur-sm rounded font-semibold text-sm md:text-base transition flex items-center border border-pink-500/50">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                            </svg>
+                            Watch Party
+                        </button>
                         <button onclick="history.back()" class="px-5 py-2.5 bg-gray-600/80 hover:bg-gray-600 backdrop-blur-sm rounded font-semibold text-sm md:text-base transition flex items-center border border-gray-500/50">
                             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
@@ -170,6 +182,55 @@
         </div>
     </div>
 </section>
+
+<!-- Share Modal -->
+<div id="share-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div class="bg-gray-900 rounded-2xl w-full max-w-md border border-gray-800 shadow-2xl overflow-hidden">
+        <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+            <h3 class="text-xl font-bold">Recommend to Friend</h3>
+            <button onclick="closeModals()" class="text-gray-400 hover:text-white transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div class="p-6">
+            <p class="text-gray-400 text-sm mb-4">Select a friend to recommend "<span id="share-movie-title" class="text-white font-semibold"></span>":</p>
+            <div id="share-friends-list" class="space-y-2 max-h-60 overflow-y-auto mb-6">
+                <div class="text-center py-4 text-gray-500 italic">Loading friends...</div>
+            </div>
+            <div class="flex justify-end gap-3">
+                <button onclick="closeModals()" class="px-4 py-2 text-gray-400 hover:text-white transition">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Watch Party Modal -->
+<div id="wp-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div class="bg-gray-900 rounded-2xl w-full max-w-md border border-gray-800 shadow-2xl overflow-hidden">
+        <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+            <h3 class="text-xl font-bold">Host Watch Party</h3>
+            <button onclick="closeModals()" class="text-gray-400 hover:text-white transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label class="block text-sm text-gray-400 mb-2">When</label>
+                <input type="datetime-local" id="wp-datetime" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-pink-500 transition">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-2">Invite Friends</label>
+                <div id="wp-friends-list" class="space-y-2 max-h-40 overflow-y-auto bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+                    <div class="text-center py-4 text-gray-500 italic">Loading friends...</div>
+                </div>
+            </div>
+            <div class="pt-4 flex justify-end gap-3">
+                <button onclick="closeModals()" class="px-4 py-2 text-gray-400 hover:text-white transition">Cancel</button>
+                <button onclick="submitWatchParty()" class="px-6 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg font-bold transition">Create Party</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 {% endblock %}
 
@@ -442,6 +503,136 @@
             await fetch(`/api/reviews/${reviewId}/helpful`, { method: 'POST' });
             await loadReviews();
         } catch (e) { console.error(e); }
+    }
+
+    // ===== SOCIAL MODALS =====
+    let friends = [];
+
+    async function loadFriendsForModals() {
+        if (friends.length > 0) return;
+        try {
+            const res = await fetch('/api/social/friends/list');
+            const data = await res.json();
+            friends = data.friends || [];
+        } catch (e) { console.error(e); }
+    }
+
+    function closeModals() {
+        document.getElementById('share-modal').classList.add('hidden');
+        document.getElementById('wp-modal').classList.add('hidden');
+    }
+
+    async function openShareModal() {
+        console.log('Opening share modal...');
+        if (!currentMovie) {
+            console.error('No movie loaded for sharing');
+            return;
+        }
+        document.getElementById('share-movie-title').textContent = currentMovie.title;
+        document.getElementById('share-modal').classList.remove('hidden');
+        
+        await loadFriendsForModals();
+        const list = document.getElementById('share-friends-list');
+        
+        if (friends.length === 0) {
+            list.innerHTML = '<div class="text-center py-4 text-gray-500">No friends found. Add some friends first!</div>';
+            return;
+        }
+
+        list.innerHTML = friends.map(f => `
+            <div onclick="recommendToFriend(${f.friend_id}, this)" class="flex items-center justify-between p-3 bg-gray-800 hover:bg-gray-700 rounded-lg cursor-pointer transition group">
+                <span class="group-hover:text-white transition pointer-events-none">${f.username}</span>
+                <button class="px-3 py-1 bg-indigo-600 rounded text-xs font-bold hover:bg-indigo-700 transition share-btn pointer-events-none">
+                    Recommend
+                </button>
+            </div>
+        `).join('');
+    }
+
+    async function recommendToFriend(friendId, element) {
+        console.log('Recommend clicked for friend:', friendId);
+        // Prevent double click if already sent
+        if (element.classList.contains('sent') || element.classList.contains('loading')) return;
+        
+        const btn = element.querySelector('.share-btn');
+        element.classList.add('loading');
+        const oldText = btn.textContent;
+        btn.textContent = 'Sending...';
+        
+        try {
+            const res = await fetch('/api/social/friends/recommend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ friend_id: friendId, movie_id: movieId })
+            });
+            if (res.ok) {
+                element.classList.add('sent');
+                btn.textContent = 'Sent!';
+                btn.classList.remove('bg-indigo-600');
+                btn.classList.add('bg-green-600');
+                element.classList.remove('hover:bg-gray-700');
+                element.classList.add('cursor-default');
+            } else {
+                const err = await res.json();
+                alert('Failed to recommend: ' + (err.error || 'Unknown error'));
+                btn.textContent = oldText;
+            }
+        } catch (e) { 
+            console.error(e); 
+            alert('An error occurred while sending the recommendation.');
+            btn.textContent = oldText;
+        } finally {
+            element.classList.remove('loading');
+        }
+    }
+
+    async function openWatchPartyModal() {
+        console.log('Opening watch party modal...');
+        document.getElementById('wp-modal').classList.remove('hidden');
+        
+        await loadFriendsForModals();
+        const list = document.getElementById('wp-friends-list');
+        
+        if (friends.length === 0) {
+            list.innerHTML = '<div class="text-center py-4 text-gray-500">No friends found.</div>';
+            return;
+        }
+
+        list.innerHTML = friends.map(f => `
+            <label class="flex items-center justify-between p-2 hover:bg-gray-700/50 rounded cursor-pointer">
+                <span>${f.username}</span>
+                <input type="checkbox" name="wp-invitee" value="${f.friend_id}" class="form-checkbox h-4 w-4 text-pink-600 rounded border-gray-700 bg-gray-800">
+            </label>
+        `).join('');
+    }
+
+    async function submitWatchParty() {
+        const datetime = document.getElementById('wp-datetime').value;
+        if (!datetime) { alert('Please select a date and time'); return; }
+        
+        const invitees = Array.from(document.querySelectorAll('input[name="wp-invitee"]:checked')).map(cb => parseInt(cb.value));
+        
+        try {
+            const res = await fetch('/api/social/watchparty/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    movie_id: movieId,
+                    scheduled_time: datetime,
+                    invitees: invitees
+                })
+            });
+            if (res.ok) {
+                alert('Watch party created successfully!');
+                closeModals();
+            } else {
+                const err = await res.json();
+                alert('Failed to create watch party: ' + (err.error || 'Unknown error'));
+            }
+        } catch (e) { 
+            console.error(e); 
+            alert('An error occurred while creating the watch party.');
+        }
     }
 </script>
 {% endblock %}

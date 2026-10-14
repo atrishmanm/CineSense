@@ -125,11 +125,15 @@ temp/
 # Large files — DO NOT commit to Git
 # ==========================================
 
-# Datasets (download separately — see README)
+# Datasets (download separately -- see README)
 data/movie-lens_ml-32m/
 data/tmdb/
 data/merged.csv
 data/encoded.csv
+
+# Benchmark data (auto-downloaded by benchmarks/run_all_benchmarks.py)
+benchmarks/ml100k_data/
+benchmarks/results/
 
 # Trained model artifacts
 model/*.pt

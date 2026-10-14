@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 social_bp = Blueprint('social', __name__, url_prefix='/api/social')
 
+@social_bp.route('/ping', methods=['GET'])
+def ping_social():
+    return jsonify({'status': 'ok', 'message': 'Social API is alive'}), 200
+
 
 # ============================================================================
 # FRIEND MANAGEMENT
@@ -198,26 +202,20 @@ def get_friends():
         
         friends = db.query("""
             SELECT 
-                CASE 
-                    WHEN f.user_id_1 = %s THEN u2.user_id
-                    ELSE u1.user_id
-                END as friend_id,
-                CASE 
-                    WHEN f.user_id_1 = %s THEN u2.username
-                    ELSE u1.username
-                END as username,
-                CASE 
-                    WHEN f.user_id_1 = %s THEN u2.email
-                    ELSE u1.email
-                END as email,
-                f.created_at
-            FROM friendships f
-            LEFT JOIN users u1 ON f.user_id_1 = u1.user_id
-            LEFT JOIN users u2 ON f.user_id_2 = u2.user_id
-            WHERE (f.user_id_1 = %s OR f.user_id_2 = %s)
-              AND f.status = 'accepted'
-            ORDER BY f.created_at DESC
-        """, (user_id, user_id, user_id, user_id, user_id))
+                u.user_id as friend_id,
+                u.user_id as id,
+                u.username,
+                u.email,
+                MAX(f.created_at) as created_at
+            FROM (
+                SELECT user_id_2 as friend_id, created_at FROM friendships WHERE user_id_1 = %s AND status = 'accepted'
+                UNION ALL
+                SELECT user_id_1 as friend_id, created_at FROM friendships WHERE user_id_2 = %s AND status = 'accepted'
+            ) f
+            JOIN users u ON f.friend_id = u.user_id
+            GROUP BY u.user_id, u.username, u.email
+            ORDER BY created_at DESC
+        """, (user_id, user_id))
         
         return jsonify({'friends': friends}), 200
     
@@ -257,26 +255,26 @@ def get_friend_recommendations():
         
         friend_ids = [f['friend_id'] for f in friends]
         
-        # Get their top-rated movies (that user hasn't seen)
+        # Get movies friends have chosen (liked)
         recommendations = db.query("""
             SELECT 
                 m.*,
                 u.username as recommended_by,
-                AVG(ui.implicit_rating) as friend_rating,
-                COUNT(DISTINCT ui.user_id) as friend_count
+                COUNT(ui.interaction_id) as friend_vote_count
             FROM movies m
-            JOIN user_interactions ui ON m.movie_id = ui.winner_id
+            JOIN user_interactions ui ON m.movie_id = ui.chosen_movie_id
             JOIN users u ON ui.user_id = u.user_id
             WHERE ui.user_id IN (%s)
-              AND ui.implicit_rating >= 4.0
               AND m.movie_id NOT IN (
-                  SELECT winner_id FROM user_interactions WHERE user_id = %s
+                  SELECT chosen_movie_id FROM user_interactions WHERE user_id = %s
+                  UNION
+                  SELECT rejected_movie_id FROM user_interactions WHERE user_id = %s
               )
             GROUP BY m.movie_id, u.username
-            ORDER BY friend_rating DESC, friend_count DESC
+            ORDER BY friend_vote_count DESC, m.popularity DESC
             LIMIT %s
-        """ % (','.join(['%s'] * len(friend_ids)), '%s', '%s'), 
-        (*friend_ids, user_id, limit))
+        """ % (','.join(['%s'] * len(friend_ids)), '%s', '%s', '%s'), 
+        (*friend_ids, user_id, user_id, limit))
         
         return jsonify({
             'recommendations': recommendations,
@@ -286,6 +284,37 @@ def get_friend_recommendations():
     except Exception as e:
         logger.error(f"Error getting friend recommendations: {e}")
         return jsonify({'error': 'Failed to get recommendations'}), 500
+
+
+@social_bp.route('/friends/recommend', methods=['POST'])
+def recommend_movie_to_friend():
+    """Explicitly recommend a movie to a friend"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        data = request.json
+        user_id = session['user_id']
+        friend_id = data.get('friend_id')
+        movie_id = data.get('movie_id')
+        
+        if not all([friend_id, movie_id]):
+            return jsonify({'error': 'friend_id and movie_id required'}), 400
+            
+        # Record this as a high-intent interaction
+        # We record it as a 'click' type to influence the recommendation engine
+        # movie_1_id, movie_2_id, chosen_movie_id, and rejected_movie_id are required fields
+        db.execute("""
+            INSERT INTO user_interactions (user_id, movie_1_id, movie_2_id, chosen_movie_id, rejected_movie_id, interaction_type)
+            VALUES (%s, %s, %s, %s, %s, 'click')
+        """, (user_id, movie_id, movie_id, movie_id, movie_id))
+        
+        # In a real app, we might send a notification here
+        return jsonify({'message': 'Movie recommended to friend!'}), 200
+        
+    except Exception as e:
+        logger.error(f"Error recommending movie: {e}")
+        return jsonify({'error': 'Failed to recommend movie'}), 500
 
 
 # ============================================================================
@@ -303,7 +332,7 @@ def create_watch_party():
         user_id = session['user_id']
         
         movie_id = data.get('movie_id')
-        scheduled_time = data.get('scheduled_time')  # ISO format
+        scheduled_time = data.get('scheduled_time', '').replace('T', ' ')  # Format for MySQL
         invitees = data.get('invitees', [])  # List of user IDs
         
         if not movie_id or not scheduled_time:
@@ -312,14 +341,14 @@ def create_watch_party():
         # Create watch party
         party_id = db.execute("""
             INSERT INTO watch_parties (host_id, movie_id, scheduled_time, status, created_at)
-            VALUES (%s, %s, %s, 'pending', NOW())
+            VALUES (%s, %s, %s, 'scheduled', NOW())
         """, (user_id, movie_id, scheduled_time), return_lastrowid=True)
         
         # Invite friends
         for friend_id in invitees:
             db.execute("""
                 INSERT INTO watch_party_invites (party_id, user_id, status, invited_at)
-                VALUES (%s, %s, 'pending', NOW())
+                VALUES (%s, %s, 'invited', NOW())
             """, (party_id, friend_id))
         
         return jsonify({

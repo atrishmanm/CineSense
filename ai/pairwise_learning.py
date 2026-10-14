@@ -139,12 +139,14 @@ class BradleyTerryModel:
         # Winner: increase strength (less so if already expected to win)
         self.strengths[winner_idx] *= (1 + self.learning_rate * (1 - p_win))
         
-        # Loser: decrease strength (more so if expected to win)
-        self.strengths[loser_idx] *= (1 - self.learning_rate * (1 - p_win))
+        # Loser: decrease strength — use exp() to guarantee positivity
+        # (the old formula  *= (1 - lr*(1-p))  can go negative)
+        self.strengths[loser_idx] *= np.exp(-self.learning_rate * (1 - p_win))
         
         # Normalize to prevent overflow
-        if np.max(self.strengths) > 1000:
-            self.strengths /= np.max(self.strengths) / 100
+        max_s = np.max(self.strengths)
+        if max_s > 1000:
+            self.strengths /= max_s / 100
     
     def get_rankings(self):
         """

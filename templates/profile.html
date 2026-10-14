@@ -107,6 +107,19 @@
             </div>
         </div>
 
+        <!-- Watchlist Section -->
+        <div class="bg-gray-900 rounded-2xl p-8 mb-12 border border-gray-800">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <svg class="w-8 h-8 mr-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                </svg>
+                Your Watchlist
+            </h2>
+            <div id="watchlist-movies" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div class="text-gray-500 col-span-full text-center py-8">Loading watchlist...</div>
+            </div>
+        </div>
+
         <!-- Director & Actor Preferences -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div class="bg-gray-900 rounded-2xl p-8">
@@ -171,6 +184,9 @@
 
             // Show favorite movies
             renderFavoriteMovies(preferences.favorite_movies || []);
+
+            // Show watchlist
+            await loadWatchlist();
 
             // Show favorite directors & actors
             renderFavoriteDirectors(preferences.favorite_directors || []);
@@ -362,6 +378,43 @@
                 </div>
             `;
         }).join('');
+    }
+
+    async function loadWatchlist() {
+        try {
+            const res = await fetch('/api/watchlist');
+            const data = await res.json();
+            const container = document.getElementById('watchlist-movies');
+            
+            if (!data.watchlist || data.watchlist.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-8">Your watchlist is empty. Add some movies!</p>';
+                return;
+            }
+
+            container.innerHTML = data.watchlist.map(movie => {
+                const posterUrl = movie.poster_path 
+                    ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+                    : 'https://via.placeholder.com/500x750?text=No+Poster';
+                
+                return `
+                    <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
+                        <div class="relative rounded-lg overflow-hidden aspect-[2/3] mb-2">
+                            <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover">
+                            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all flex items-center justify-center">
+                                <span class="text-indigo-400 font-bold opacity-0 group-hover:opacity-100">
+                                    View Details
+                                </span>
+                            </div>
+                        </div>
+                        <p class="text-sm font-semibold truncate">${movie.title}</p>
+                        <p class="text-xs text-gray-400">${movie.release_year || ''}</p>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('Error loading watchlist:', error);
+            document.getElementById('watchlist-movies').innerHTML = '<p class="text-red-400 col-span-full text-center py-8">Could not load watchlist.</p>';
+        }
     }
 
     function renderFavoriteDirectors(directors) {
