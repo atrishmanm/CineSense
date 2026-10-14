@@ -247,13 +247,13 @@ class CandidateGenerator:
             list: Genre IDs sorted by preference
         """
         try:
-            # Query user's interacted movies
+            # Query user's interacted movies (chosen_movie_id = pairwise winner)
             query = """
             SELECT g.genre_id, COUNT(*) as interaction_count
             FROM user_interactions ui
-            JOIN movie_genres mg ON ui.movie_id = mg.movie_id
+            JOIN movie_genres mg ON ui.chosen_movie_id = mg.movie_id
             JOIN genres g ON mg.genre_id = g.genre_id
-            WHERE ui.user_id = %s AND ui.chosen = TRUE
+            WHERE ui.user_id = %s AND ui.chosen_movie_id IS NOT NULL
             GROUP BY g.genre_id
             ORDER BY interaction_count DESC
             LIMIT 5
@@ -318,9 +318,9 @@ class CandidateGenerator:
                 query = """
                 SELECT m.movie_id, m.title, m.tmdb_id
                 FROM movies m
-                JOIN user_interactions ui ON m.movie_id = ui.movie_id
-                WHERE ui.user_id = %s AND ui.chosen = TRUE
-                ORDER BY ui.interaction_time DESC
+                JOIN user_interactions ui ON m.movie_id = ui.chosen_movie_id
+                WHERE ui.user_id = %s AND ui.chosen_movie_id IS NOT NULL
+                ORDER BY ui.timestamp DESC
                 LIMIT %s
                 """
                 

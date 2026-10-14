@@ -135,7 +135,7 @@ class TrendingDetector:
                     m.title,
                     m.poster_path,
                     m.release_year,
-                    m.vote_average,
+                    m.tmdb_rating,
                     COUNT(ui.interaction_id) as interaction_count
                 FROM movies m
                 JOIN user_interactions ui ON m.movie_id = ui.chosen_movie_id
