@@ -2,9 +2,19 @@
 
 USE cinesense;
 
+-- Disable FK checks so DROP/CREATE order is irrelevant for CLI loads
+SET FOREIGN_KEY_CHECKS = 0;
+
 -- ============================================================================
 -- DROP EXISTING OBJECTS (For Clean Setup)
 -- ============================================================================
+DROP TABLE IF EXISTS collaborative_list_items;
+DROP TABLE IF EXISTS collaborative_list_members;
+DROP TABLE IF EXISTS collaborative_lists;
+DROP TABLE IF EXISTS watch_party_invites;
+DROP TABLE IF EXISTS watch_parties;
+DROP TABLE IF EXISTS friendships;
+DROP TABLE IF EXISTS friend_requests;
 DROP TABLE IF EXISTS genre_win_counts;
 DROP TABLE IF EXISTS movie_reviews;
 DROP TABLE IF EXISTS watchlist;
@@ -71,6 +81,7 @@ CREATE TABLE movies (
     vote_count INT,
     popularity DECIMAL(10,3),
     watch_link VARCHAR(500),
+    media_type ENUM('movie', 'tv') NOT NULL DEFAULT 'movie',
     elo_score INT DEFAULT 1500,
     comparison_count INT DEFAULT 0,
     movie_source ENUM('tmdb_api', 'user_interaction', 'cache', 'database') DEFAULT 'database',
@@ -92,6 +103,7 @@ CREATE TABLE movies (
     INDEX idx_release_year (release_year),
     INDEX idx_elo_score (elo_score),
     INDEX idx_popularity (popularity),
+    INDEX idx_media_type (media_type),
     INDEX idx_movie_source (movie_source),
     INDEX idx_is_persisted (is_persisted),
     INDEX idx_last_accessed (last_accessed),
@@ -400,6 +412,90 @@ INSERT INTO genre_win_counts (genre_id, win_count, loss_count)
 SELECT genre_id, 0, 0 FROM genres;
 
 -- ============================================================================
+-- SOCIAL FEATURE TABLES (friendships, watch parties, collaborative lists)
+-- Authoritative DDL: kept in sync with db_manager.ensure_social_tables()
+-- ============================================================================
+
+CREATE TABLE friend_requests (
+    request_id INT AUTO_INCREMENT PRIMARY KEY,
+    from_user_id INT NOT NULL,
+    to_user_id INT NOT NULL,
+    status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (from_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (to_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_request (from_user_id, to_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE friendships (
+    friendship_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id_1 INT NOT NULL,
+    user_id_2 INT NOT NULL,
+    status ENUM('accepted', 'blocked') DEFAULT 'accepted',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id_1) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id_2) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_friendship (user_id_1, user_id_2)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE watch_parties (
+    party_id INT AUTO_INCREMENT PRIMARY KEY,
+    host_id INT NOT NULL,
+    movie_id INT NOT NULL,
+    scheduled_time DATETIME NOT NULL,
+    status ENUM('scheduled', 'pending', 'active', 'live', 'completed', 'cancelled') DEFAULT 'scheduled',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (host_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE watch_party_invites (
+    invite_id INT AUTO_INCREMENT PRIMARY KEY,
+    party_id INT NOT NULL,
+    user_id INT NOT NULL,
+    status ENUM('invited', 'pending', 'accepted', 'declined') DEFAULT 'invited',
+    invited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (party_id) REFERENCES watch_parties(party_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_invite (party_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE collaborative_lists (
+    list_id INT AUTO_INCREMENT PRIMARY KEY,
+    creator_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_public BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (creator_id) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE collaborative_list_items (
+    item_id INT AUTO_INCREMENT PRIMARY KEY,
+    list_id INT NOT NULL,
+    movie_id INT NOT NULL,
+    added_by INT NOT NULL,
+    notes VARCHAR(500) NULL,
+    position INT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (list_id) REFERENCES collaborative_lists(list_id) ON DELETE CASCADE,
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE,
+    FOREIGN KEY (added_by) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_list_movie (list_id, movie_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE collaborative_list_members (
+    member_id INT AUTO_INCREMENT PRIMARY KEY,
+    list_id INT NOT NULL,
+    user_id INT NOT NULL,
+    role ENUM('owner', 'editor', 'viewer') DEFAULT 'editor',
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (list_id) REFERENCES collaborative_lists(list_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_list_member (list_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
 -- VIEWS FOR EASIER QUERYING
 -- ============================================================================
 
@@ -410,6 +506,7 @@ SELECT
     m.movie_id,
     m.tmdb_id,
     m.title,
+    m.original_title,
     m.overview,
     m.release_year,
     m.runtime,
@@ -419,6 +516,7 @@ SELECT
     m.vote_count,
     m.popularity,
     m.watch_link,
+    m.media_type,
     m.elo_score,
     m.comparison_count,
     GROUP_CONCAT(DISTINCT g.genre_name ORDER BY g.genre_name SEPARATOR ', ') AS genres,
@@ -722,6 +820,11 @@ BEGIN
     DECLARE v_new_elo_winner INT;
     DECLARE v_new_elo_loser INT;
     
+    IF p_chosen_movie_id NOT IN (p_movie_1_id, p_movie_2_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'chosen movie must be one of the compared pair';
+    END IF;
+
     IF p_chosen_movie_id = p_movie_1_id THEN
         SET v_rejected_movie_id = p_movie_2_id;
     ELSE
@@ -736,8 +839,8 @@ BEGIN
         p_chosen_movie_id, v_rejected_movie_id, p_session_id
     );
     
-    SELECT elo_score INTO v_elo_winner FROM movies WHERE movie_id = p_chosen_movie_id;
-    SELECT elo_score INTO v_elo_loser FROM movies WHERE movie_id = v_rejected_movie_id;
+    SELECT COALESCE(elo_score, 1500) INTO v_elo_winner FROM movies WHERE movie_id = p_chosen_movie_id;
+    SELECT COALESCE(elo_score, 1500) INTO v_elo_loser FROM movies WHERE movie_id = v_rejected_movie_id;
     
     SET v_expected_score = 1.0 / (1.0 + POWER(10, (v_elo_loser - v_elo_winner) / 400.0));
     
@@ -913,13 +1016,20 @@ CREATE PROCEDURE search_movies_advanced(
 )
 BEGIN
     DECLARE v_search_lower VARCHAR(500);
+    DECLARE v_search_type VARCHAR(20);
+    DECLARE v_results_count INT DEFAULT 0;
     
     SET v_search_lower = LOWER(p_search_query);
+    -- Sanitize against the search_history.search_type ENUM (unknown -> 'title')
+    SET v_search_type = CASE
+        WHEN p_search_type IN ('title', 'storyline', 'semantic', 'advanced') THEN p_search_type
+        ELSE 'title'
+    END;
     
     INSERT INTO search_history (user_id, search_query, search_type)
-    VALUES (p_user_id, p_search_query, p_search_type);
+    VALUES (p_user_id, p_search_query, v_search_type);
     
-    IF p_search_type = 'storyline' OR p_search_type = 'semantic' THEN
+    IF v_search_type = 'storyline' OR v_search_type = 'semantic' THEN
         SELECT DISTINCT m.*, 
             (
                 (CASE WHEN LOWER(m.title) = v_search_lower THEN 1000 ELSE 0 END) +
@@ -939,6 +1049,17 @@ BEGIN
            OR LOWER(m.directors) LIKE CONCAT('%', v_search_lower, '%')
         ORDER BY relevance_score DESC, m.popularity DESC
         LIMIT p_limit;
+        
+        SET v_results_count = (
+            SELECT COUNT(DISTINCT m.movie_id)
+            FROM comprehensive_movie_view m
+            WHERE LOWER(m.title) LIKE CONCAT('%', v_search_lower, '%')
+               OR LOWER(m.overview) LIKE CONCAT('%', v_search_lower, '%')
+               OR LOWER(m.keywords) LIKE CONCAT('%', v_search_lower, '%')
+               OR LOWER(m.genres) LIKE CONCAT('%', v_search_lower, '%')
+               OR LOWER(m.cast) LIKE CONCAT('%', v_search_lower, '%')
+               OR LOWER(m.directors) LIKE CONCAT('%', v_search_lower, '%')
+        );
     ELSE
         SELECT DISTINCT m.*,
             (
@@ -950,10 +1071,16 @@ BEGIN
         WHERE LOWER(m.title) LIKE CONCAT('%', v_search_lower, '%')
         ORDER BY relevance_score DESC, m.popularity DESC
         LIMIT p_limit;
+        
+        SET v_results_count = (
+            SELECT COUNT(DISTINCT m.movie_id)
+            FROM comprehensive_movie_view m
+            WHERE LOWER(m.title) LIKE CONCAT('%', v_search_lower, '%')
+        );
     END IF;
     
     UPDATE search_history
-    SET results_count = (SELECT FOUND_ROWS())
+    SET results_count = v_results_count
     WHERE search_id = LAST_INSERT_ID();
 END //
 DELIMITER ;
@@ -969,16 +1096,27 @@ CREATE PROCEDURE update_cache_stats(
     IN p_memory_usage_kb INT
 )
 BEGIN
+    DECLARE v_cache_type VARCHAR(20);
+    -- Sanitize against the cache_stats.cache_type ENUM
+    SET v_cache_type = CASE
+        WHEN p_cache_type IN ('movie', 'vector', 'user', 'recommendation') THEN p_cache_type
+        ELSE 'movie'
+    END;
+
     INSERT INTO cache_stats (
         stat_date, cache_type, cache_hits, cache_misses,
         avg_response_time_ms, memory_usage_kb
     ) VALUES (
-        CURRENT_DATE, p_cache_type, p_hits, p_misses,
+        CURRENT_DATE, v_cache_type, p_hits, p_misses,
         p_response_time_ms, p_memory_usage_kb
     ) ON DUPLICATE KEY UPDATE
+        -- Weighted running mean over total samples (evaluated first, using old counts)
+        avg_response_time_ms = (
+            avg_response_time_ms * (cache_hits + cache_misses)
+            + p_response_time_ms * (p_hits + p_misses)
+        ) / NULLIF(cache_hits + cache_misses + p_hits + p_misses, 0),
         cache_hits = cache_hits + p_hits,
         cache_misses = cache_misses + p_misses,
-        avg_response_time_ms = (avg_response_time_ms + p_response_time_ms) / 2,
         memory_usage_kb = p_memory_usage_kb,
         recorded_at = CURRENT_TIMESTAMP;
 END //
@@ -1000,7 +1138,7 @@ BEGIN
     FROM user_preferences
     WHERE user_id = p_user_id;
     
-    IF v_interaction_count < 10 THEN
+    IF COALESCE(v_interaction_count, 0) < 10 THEN
         SELECT m.* FROM comprehensive_movie_view m
         WHERE m.tmdb_rating >= 7.0
         AND m.popularity > 50
@@ -1054,8 +1192,8 @@ BEGIN
     DECLARE v_new_elo_winner INT;
     DECLARE v_new_elo_loser INT;
     
-    SELECT elo_score INTO v_elo_winner FROM movies WHERE movie_id = p_winner_id;
-    SELECT elo_score INTO v_elo_loser FROM movies WHERE movie_id = p_loser_id;
+    SELECT COALESCE(elo_score, 1500) INTO v_elo_winner FROM movies WHERE movie_id = p_winner_id;
+    SELECT COALESCE(elo_score, 1500) INTO v_elo_loser FROM movies WHERE movie_id = p_loser_id;
     
     SET v_expected_score = 1.0 / (1.0 + POWER(10, (v_elo_loser - v_elo_winner) / 400.0));
     
@@ -1161,19 +1299,23 @@ CREATE FUNCTION calculate_cache_hit_rate(
 DETERMINISTIC
 READS SQL DATA
 BEGIN
-    DECLARE v_hit_rate DECIMAL(5,2);
-    
-    SELECT 
-        CASE 
-            WHEN (cache_hits + cache_misses) > 0 
-            THEN (cache_hits / (cache_hits + cache_misses)) * 100
-            ELSE 0
-        END INTO v_hit_rate
+    DECLARE v_hits INT DEFAULT 0;
+    DECLARE v_misses INT DEFAULT 0;
+    DECLARE v_hit_rate DECIMAL(5,2) DEFAULT 0;
+
+    -- Aggregate across all rows for the day (a single SELECT ... INTO would
+    -- raise ER_SUBQUERY_NO_1_ROW when more than one stat row exists per day).
+    SELECT COALESCE(SUM(cache_hits), 0), COALESCE(SUM(cache_misses), 0)
+    INTO v_hits, v_misses
     FROM cache_stats
     WHERE cache_type = p_cache_type
     AND stat_date = CURRENT_DATE;
-    
-    RETURN COALESCE(v_hit_rate, 0);
+
+    IF (v_hits + v_misses) > 0 THEN
+        SET v_hit_rate = (v_hits / (v_hits + v_misses)) * 100;
+    END IF;
+
+    RETURN v_hit_rate;
 END //
 DELIMITER ;
 
@@ -1267,6 +1409,14 @@ CREATE INDEX idx_movies_year_rating ON movies(release_year DESC, tmdb_rating DES
 CREATE INDEX idx_user_interactions_user_timestamp ON user_interactions(user_id, timestamp DESC);
 CREATE INDEX idx_recommendation_log_user_movie ON recommendation_log(user_id, movie_id);
 
+-- Hot-path indexes added by audit (C325-C330)
+CREATE INDEX idx_user_interactions_movie1 ON user_interactions(movie_1_id);
+CREATE INDEX idx_user_interactions_movie2 ON user_interactions(movie_2_id);
+CREATE INDEX idx_reviews_user_created ON movie_reviews(user_id, created_at DESC);
+CREATE INDEX idx_recommendation_log_feedback ON recommendation_log(was_clicked, was_watched);
+CREATE INDEX idx_watchlist_user_status ON watchlist(user_id, status, priority);
+CREATE INDEX idx_user_preferences_favorite_genre ON user_preferences(favorite_genre);
+
 -- Full-text search index
 ALTER TABLE movies ADD FULLTEXT INDEX ft_title_overview (title, overview);
 
@@ -1274,7 +1424,7 @@ ALTER TABLE movies ADD FULLTEXT INDEX ft_title_overview (title, overview);
 -- COMPLETION MESSAGE
 -- ============================================================================
 SELECT 'CineSense comprehensive database schema created successfully!' AS Status;
-SELECT 'Tables: 16 | Views: 13 | Procedures: 8 | Functions: 4 | Triggers: 5 | CHECK Constraints: 9' AS Summary;
+SELECT 'Tables: 28 | Views: 24 | Procedures: 24 | Functions: 8 | Triggers: 11 (+8 social feature tables)' AS Summary;
 
 -- ============================================================================
 -- EXTENDED TABLES (AI Features: Semantic Search, Mood, A/B Testing)
@@ -1379,6 +1529,14 @@ CREATE TABLE IF NOT EXISTS model_versions (
     INDEX idx_active_model (model_name, is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Migration bookkeeping (used by database/run_migration.py)
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    migration_id INT AUTO_INCREMENT PRIMARY KEY,
+    migration_name VARCHAR(255) NOT NULL UNIQUE,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_migration_name (migration_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================================
 -- EXTENDED VIEWS (AI Features)
 -- ============================================================================
@@ -1452,11 +1610,11 @@ CREATE PROCEDURE get_mood_recommendations(
 BEGIN
     DECLARE genre_list VARCHAR(500);
     SET genre_list = CASE mood_param
-        WHEN 'happy'       THEN 'Comedy,Animation,Family,Musical'
+        WHEN 'happy'       THEN 'Comedy,Animation,Family,Music'
         WHEN 'sad'         THEN 'Drama,Romance'
         WHEN 'stressed'    THEN 'Comedy,Animation'
-        WHEN 'bored'       THEN 'Action,Adventure,Thriller,Sci-Fi'
-        WHEN 'thoughtful'  THEN 'Drama,Documentary,Mystery,Sci-Fi'
+        WHEN 'bored'       THEN 'Action,Adventure,Thriller,Science Fiction'
+        WHEN 'thoughtful'  THEN 'Drama,Documentary,Mystery,Science Fiction'
         WHEN 'romantic'    THEN 'Romance,Drama,Comedy'
         WHEN 'adventurous' THEN 'Adventure,Action,Fantasy'
         ELSE 'Action,Comedy,Drama'
@@ -1762,12 +1920,14 @@ BEGIN
     DECLARE v_user_id INT;
     DECLARE v_fav_genre VARCHAR(50);
     DECLARE v_seeded_count INT DEFAULT 0;
+    DECLARE v_error_count INT DEFAULT 0;
     DECLARE user_cursor CURSOR FOR
         SELECT u.user_id, COALESCE(up.favorite_genre, 'Action') AS fav_genre
         FROM users u LEFT JOIN user_preferences up ON u.user_id = up.user_id
         WHERE NOT EXISTS (SELECT 1 FROM watchlist w WHERE w.user_id = u.user_id);
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
-    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION BEGIN END;
+    -- Best-effort seeding: count failures instead of swallowing them silently.
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET v_error_count = v_error_count + 1;
     OPEN user_cursor;
     user_loop: LOOP
         FETCH user_cursor INTO v_user_id, v_fav_genre;
@@ -1782,7 +1942,8 @@ BEGIN
         SET v_seeded_count = v_seeded_count + ROW_COUNT();
     END LOOP user_loop;
     CLOSE user_cursor;
-    SELECT CONCAT('Seeded ', v_seeded_count, ' watchlist entries.') AS result;
+    SELECT CONCAT('Seeded ', v_seeded_count, ' watchlist entries (',
+                  v_error_count, ' errors).') AS result;
 END //
 DELIMITER ;
 
@@ -1849,7 +2010,7 @@ BEGIN
     audit_loop: LOOP
         FETCH genre_cursor INTO v_genre_id, v_genre_name, v_total_movies, v_avg_rating;
         IF v_done THEN LEAVE audit_loop; END IF;
-        SELECT COALESCE(win_count, 0), COALESCE(loss_count, 0) INTO v_win_count, v_loss_count
+        SELECT COALESCE(SUM(win_count), 0), COALESCE(SUM(loss_count), 0) INTO v_win_count, v_loss_count
         FROM genre_win_counts WHERE genre_id = v_genre_id;
         INSERT INTO tmp_genre_audit VALUES (v_genre_id, v_genre_name, v_total_movies, v_avg_rating,
             v_win_count, v_loss_count, ROUND(v_win_count / NULLIF(v_win_count + v_loss_count, 0) * 100, 2));
@@ -1976,11 +2137,29 @@ DELIMITER //
 DROP PROCEDURE IF EXISTS cleanup_temporary_movies //
 CREATE PROCEDURE cleanup_temporary_movies(IN days_old INT)
 BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    -- Guard against a destructive no-op / negative interval cascade.
+    IF days_old IS NULL OR days_old < 1 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'days_old must be >= 1';
+    END IF;
+
+    START TRANSACTION;
+
     DELETE FROM movies
     WHERE is_persisted = FALSE
       AND last_accessed < DATE_SUB(NOW(), INTERVAL days_old DAY);
 
-    SELECT ROW_COUNT() AS deleted_count;
+    SET @deleted_count = ROW_COUNT();
+
+    COMMIT;
+
+    SELECT @deleted_count AS deleted_count;
 END //
 
 DROP PROCEDURE IF EXISTS persist_movie //
@@ -2166,3 +2345,7 @@ DELIMITER ;
 
 
 SELECT 'Concurrency control procedures created successfully!' AS Status;
+
+-- Re-enable FK checks (disabled at top for CLI load ordering)
+SET FOREIGN_KEY_CHECKS = 1;
+

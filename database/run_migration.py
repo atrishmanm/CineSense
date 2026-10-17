@@ -60,41 +60,42 @@ class MigrationRunner:
                 sql_content = f.read()
 
             cursor = self.connection.cursor()
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+            try:
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
 
-            statements = []
-            current_delimiter = ';'
-            current_statement = ''
+                statements = []
+                current_delimiter = ';'
+                current_statement = ''
 
-            for raw_line in sql_content.split('\n'):
-                line = raw_line.strip()
+                for raw_line in sql_content.split('\n'):
+                    line = raw_line.strip()
 
-                if not line or line.startswith('--'):
-                    continue
+                    if not line or line.startswith('--'):
+                        continue
 
-                if line.upper().startswith('DELIMITER'):
-                    parts = line.split()
-                    if len(parts) > 1:
-                        current_delimiter = parts[1]
-                    continue
+                    if line.upper().startswith('DELIMITER'):
+                        parts = line.split()
+                        if len(parts) > 1:
+                            current_delimiter = parts[1]
+                        continue
 
-                current_statement += raw_line + '\n'
-                if current_statement.rstrip().endswith(current_delimiter):
-                    statement = current_statement.rstrip()
-                    statement = statement[: -len(current_delimiter)].strip()
-                    if statement:
-                        statements.append(statement)
-                    current_statement = ''
+                    current_statement += raw_line + '\n'
+                    if current_statement.rstrip().endswith(current_delimiter):
+                        statement = current_statement.rstrip()
+                        statement = statement[: -len(current_delimiter)].strip()
+                        if statement:
+                            statements.append(statement)
+                        current_statement = ''
 
-            for statement in statements:
-                cursor.execute(statement)
-                if getattr(cursor, 'with_rows', False):
-                    cursor.fetchall()
+                for statement in statements:
+                    cursor.execute(statement)
+                    if getattr(cursor, 'with_rows', False):
+                        cursor.fetchall()
 
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-            self.connection.commit()
-            cursor.close()
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+                self.connection.commit()
+            finally:
+                cursor.close()
             logger.info(f"Schema applied successfully: {schema_path}")
             return True
         except Exception as e:
@@ -118,18 +119,18 @@ class MigrationRunner:
         """Create table to track applied migrations"""
         try:
             cursor = self.connection.cursor()
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS schema_migrations (
-                    migration_id INT AUTO_INCREMENT PRIMARY KEY,
-                    migration_name VARCHAR(255) NOT NULL UNIQUE,
-                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_migration_name (migration_name)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """)
-            
-            self.connection.commit()
-            cursor.close()
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS schema_migrations (
+                        migration_id INT AUTO_INCREMENT PRIMARY KEY,
+                        migration_name VARCHAR(255) NOT NULL UNIQUE,
+                        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_migration_name (migration_name)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+                self.connection.commit()
+            finally:
+                cursor.close()
             logger.info("Migrations tracking table ready")
             return True
             
@@ -141,15 +142,14 @@ class MigrationRunner:
         """Check if migration has been applied"""
         try:
             cursor = self.connection.cursor()
-            
-            cursor.execute(
-                "SELECT COUNT(*) FROM schema_migrations WHERE migration_name = %s",
-                (migration_name,)
-            )
-            
-            count = cursor.fetchone()[0]
-            cursor.close()
-            
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM schema_migrations WHERE migration_name = %s",
+                    (migration_name,)
+                )
+                count = cursor.fetchone()[0]
+            finally:
+                cursor.close()
             return count > 0
             
         except mysql.connector.Error as err:
@@ -160,14 +160,14 @@ class MigrationRunner:
         """Mark migration as applied"""
         try:
             cursor = self.connection.cursor()
-            
-            cursor.execute(
-                "INSERT INTO schema_migrations (migration_name) VALUES (%s)",
-                (migration_name,)
-            )
-            
-            self.connection.commit()
-            cursor.close()
+            try:
+                cursor.execute(
+                    "INSERT INTO schema_migrations (migration_name) VALUES (%s)",
+                    (migration_name,)
+                )
+                self.connection.commit()
+            finally:
+                cursor.close()
             logger.info(f"Marked migration as applied: {migration_name}")
             return True
             
@@ -191,67 +191,74 @@ class MigrationRunner:
             
             # Execute migration
             cursor = self.connection.cursor()
-            
-            # Split by delimiter changes and execute statements
-            statements = []
-            current_delimiter = ';'
-            current_statement = ''
-            
-            for line in sql_content.split('\n'):
-                line = line.strip()
-                
-                # Skip comments
-                if line.startswith('--') or not line:
-                    continue
-                
-                # Check for delimiter change
-                if line.upper().startswith('DELIMITER'):
-                    parts = line.split()
-                    if len(parts) > 1:
-                        current_delimiter = parts[1]
-                    continue
-                
-                # Accumulate statement
-                current_statement += line + '\n'
-                
-                # Check if statement is complete
-                if current_delimiter in line:
-                    # Remove the delimiter
-                    current_statement = current_statement.replace(current_delimiter, ';').strip()
-                    if current_statement and current_statement != ';':
-                        statements.append(current_statement)
-                    current_statement = ''
-            
-            # Execute all statements
-            for i, statement in enumerate(statements, 1):
-                try:
-                    # Clean statement
-                    statement = statement.strip()
-                    if not statement or statement == ';':
+            had_error = False
+            try:
+                # Split by delimiter changes and execute statements
+                statements = []
+                current_delimiter = ';'
+                current_statement = ''
+
+                for line in sql_content.split('\n'):
+                    line = line.strip()
+
+                    # Skip comments
+                    if line.startswith('--') or not line:
                         continue
-                    
-                    # Remove trailing semicolon for some statements
-                    if statement.endswith(';'):
-                        statement = statement[:-1]
-                    
-                    logger.info(f"Executing statement {i}/{len(statements)}...")
-                    cursor.execute(statement, multi=True)
-                    
-                except mysql.connector.Error as err:
-                    # Some errors are expected (like IF NOT EXISTS when already exists)
-                    if 'already exists' in str(err).lower() or 'duplicate' in str(err).lower():
-                        logger.warning(f"Statement {i} skipped (already exists): {str(err)[:100]}")
-                    else:
-                        logger.error(f"Error executing statement {i}: {err}")
-                        logger.error(f"Statement: {statement[:200]}...")
-                        # Continue with other statements
-            
-            self.connection.commit()
-            cursor.close()
-            
+
+                    # Check for delimiter change
+                    if line.upper().startswith('DELIMITER'):
+                        parts = line.split()
+                        if len(parts) > 1:
+                            current_delimiter = parts[1]
+                        continue
+
+                    # Accumulate statement
+                    current_statement += line + '\n'
+
+                    # Check if statement is complete
+                    if current_delimiter in line:
+                        # Remove the delimiter
+                        current_statement = current_statement.replace(current_delimiter, ';').strip()
+                        if current_statement and current_statement != ';':
+                            statements.append(current_statement)
+                        current_statement = ''
+
+                # Execute all statements
+                for i, statement in enumerate(statements, 1):
+                    try:
+                        # Clean statement
+                        statement = statement.strip()
+                        if not statement or statement == ';':
+                            continue
+
+                        # Remove trailing semicolon for some statements
+                        if statement.endswith(';'):
+                            statement = statement[:-1]
+
+                        logger.info(f"Executing statement {i}/{len(statements)}...")
+                        cursor.execute(statement)
+
+                    except mysql.connector.Error as err:
+                        # Some errors are expected (like IF NOT EXISTS when already exists)
+                        if 'already exists' in str(err).lower() or 'duplicate' in str(err).lower():
+                            logger.warning(f"Statement {i} skipped (already exists): {str(err)[:100]}")
+                        else:
+                            logger.error(f"Error executing statement {i}: {err}")
+                            logger.error(f"Statement: {statement[:200]}...")
+                            had_error = True
+
+                if had_error:
+                    logger.error(f"Migration had errors, not marking as applied: {migration_name}")
+                    self.connection.rollback()
+                    return False
+
+                self.connection.commit()
+            finally:
+                cursor.close()
+
             # Mark as applied
             self.mark_migration_applied(migration_name)
-            
+
             logger.info(f"Migration completed successfully: {migration_name}")
             return True
             
@@ -321,16 +328,15 @@ class MigrationRunner:
         """Get status of all migrations"""
         try:
             cursor = self.connection.cursor(dictionary=True)
-            
-            cursor.execute("""
-                SELECT migration_name, applied_at 
-                FROM schema_migrations 
-                ORDER BY migration_id DESC
-            """)
-            
-            migrations = cursor.fetchall()
-            cursor.close()
-            
+            try:
+                cursor.execute("""
+                    SELECT migration_name, applied_at 
+                    FROM schema_migrations 
+                    ORDER BY migration_id DESC
+                """)
+                migrations = cursor.fetchall()
+            finally:
+                cursor.close()
             return migrations
             
         except mysql.connector.Error as err:

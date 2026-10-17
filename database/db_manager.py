@@ -113,15 +113,16 @@ class DatabaseManager:
             INSERT INTO movies (
                 movie_id, tmdb_id, title, original_title, overview,
                 release_year, runtime, poster_path, backdrop_path,
-                tmdb_rating, vote_count, popularity, watch_link
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                tmdb_rating, vote_count, popularity, watch_link, media_type
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 title = VALUES(title),
                 overview = VALUES(overview),
                 poster_path = VALUES(poster_path),
                 tmdb_rating = VALUES(tmdb_rating),
                 vote_count = VALUES(vote_count),
-                popularity = VALUES(popularity)
+                popularity = VALUES(popularity),
+                media_type = VALUES(media_type)
         """
         with self.get_cursor() as cursor:
             cursor.execute(query, (
@@ -137,7 +138,8 @@ class DatabaseManager:
                 movie_data.get('tmdb_rating'),
                 movie_data.get('vote_count'),
                 movie_data.get('popularity'),
-                movie_data.get('watch_link')
+                movie_data.get('watch_link'),
+                movie_data.get('media_type', 'movie')
             ))
     
     def get_movie_by_id(self, movie_id):
@@ -399,12 +401,11 @@ class DatabaseManager:
         """Record a user's pairwise choice using stored procedure"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor()
                 # Call the stored procedure that handles Elo updates automatically
-                cursor.callproc('record_user_interaction', 
-                    [user_id, movie_1_id, movie_2_id, chosen_movie_id, session_id])
+                with connection.cursor() as cursor:
+                    cursor.callproc('record_user_interaction',
+                        [user_id, movie_1_id, movie_2_id, chosen_movie_id, session_id])
                 connection.commit()
-                cursor.close()
                 return True
         except Exception as e:
             logger.error(f"Error recording interaction: {e}")
@@ -527,17 +528,16 @@ class DatabaseManager:
         """Advanced search using stored procedure with storyline/semantic support"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor(dictionary=True)
-                cursor.callproc('search_movies_advanced', 
-                    [search_query, search_type, user_id, limit])
-                
-                # Fetch results from the procedure
-                results = []
-                for result in cursor.stored_results():
-                    results = result.fetchall()
-                
+                with connection.cursor(dictionary=True) as cursor:
+                    cursor.callproc('search_movies_advanced',
+                        [search_query, search_type, user_id, limit])
+
+                    # Fetch results from the procedure
+                    results = []
+                    for result in cursor.stored_results():
+                        results = result.fetchall()
+
                 connection.commit()
-                cursor.close()
                 return results
         except Exception as e:
             logger.error(f"Error in advanced search: {e}")
@@ -548,16 +548,15 @@ class DatabaseManager:
         """Get personalized recommendations using stored procedure with cursor"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor(dictionary=True)
-                cursor.callproc('get_personalized_recommendations', [user_id, limit])
-                
-                # Fetch results
-                results = []
-                for result in cursor.stored_results():
-                    results = result.fetchall()
-                
+                with connection.cursor(dictionary=True) as cursor:
+                    cursor.callproc('get_personalized_recommendations', [user_id, limit])
+
+                    # Fetch results
+                    results = []
+                    for result in cursor.stored_results():
+                        results = result.fetchall()
+
                 connection.commit()
-                cursor.close()
                 return results
         except Exception as e:
             logger.error(f"Error getting personalized recommendations: {e}")
@@ -567,16 +566,15 @@ class DatabaseManager:
         """Get comparison pair using stored procedure"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor(dictionary=True)
-                cursor.callproc('get_comparison_pair', [user_id])
-                
-                # Fetch results
-                results = []
-                for result in cursor.stored_results():
-                    results = result.fetchall()
-                
+                with connection.cursor(dictionary=True) as cursor:
+                    cursor.callproc('get_comparison_pair', [user_id])
+
+                    # Fetch results
+                    results = []
+                    for result in cursor.stored_results():
+                        results = result.fetchall()
+
                 connection.commit()
-                cursor.close()
                 
                 # Return two movies if available
                 if len(results) >= 2:
@@ -590,10 +588,9 @@ class DatabaseManager:
         """Update user preferences using stored procedure"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor()
-                cursor.callproc('update_user_preferences', [user_id])
+                with connection.cursor() as cursor:
+                    cursor.callproc('update_user_preferences', [user_id])
                 connection.commit()
-                cursor.close()
                 return True
         except Exception as e:
             logger.error(f"Error updating user preferences: {e}")
@@ -603,11 +600,10 @@ class DatabaseManager:
         """Update cache statistics using stored procedure"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor()
-                cursor.callproc('update_cache_stats', 
-                    [cache_type, hits, misses, response_time_ms, memory_usage_kb])
+                with connection.cursor() as cursor:
+                    cursor.callproc('update_cache_stats',
+                        [cache_type, hits, misses, response_time_ms, memory_usage_kb])
                 connection.commit()
-                cursor.close()
                 return True
         except Exception as e:
             logger.error(f"Error updating cache stats: {e}")
@@ -814,13 +810,12 @@ class DatabaseManager:
         """Run genre audit report using cursor-based stored procedure"""
         try:
             with self.get_connection() as connection:
-                cursor = connection.cursor(dictionary=True)
-                cursor.callproc('generate_genre_audit')
-                results = []
-                for result in cursor.stored_results():
-                    results = result.fetchall()
+                with connection.cursor(dictionary=True) as cursor:
+                    cursor.callproc('generate_genre_audit')
+                    results = []
+                    for result in cursor.stored_results():
+                        results = result.fetchall()
                 connection.commit()
-                cursor.close()
                 return results
         except Exception as e:
             logger.error(f"Genre audit error: {e}")
@@ -847,7 +842,12 @@ class DatabaseManager:
             return cursor.rowcount
     
     def ensure_social_tables(self):
-        """Create social feature tables if they don't exist"""
+        """Create social feature tables if they don't exist.
+
+        Authoritative DDL lives in database/schema.sql; this is an idempotent
+        runtime safety net for databases created before the social tables were
+        added to the schema. Keep the two in sync.
+        """
         tables = [
             """
             CREATE TABLE IF NOT EXISTS friend_requests (
@@ -879,7 +879,7 @@ class DatabaseManager:
                 host_id INT NOT NULL,
                 movie_id INT NOT NULL,
                 scheduled_time DATETIME NOT NULL,
-                status ENUM('pending', 'active', 'completed', 'cancelled') DEFAULT 'pending',
+                status ENUM('scheduled', 'pending', 'active', 'live', 'completed', 'cancelled') DEFAULT 'scheduled',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (host_id) REFERENCES users(user_id) ON DELETE CASCADE,
                 FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE
@@ -890,7 +890,7 @@ class DatabaseManager:
                 invite_id INT AUTO_INCREMENT PRIMARY KEY,
                 party_id INT NOT NULL,
                 user_id INT NOT NULL,
-                status ENUM('pending', 'accepted', 'declined') DEFAULT 'pending',
+                status ENUM('invited', 'pending', 'accepted', 'declined') DEFAULT 'invited',
                 invited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (party_id) REFERENCES watch_parties(party_id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
@@ -914,6 +914,8 @@ class DatabaseManager:
                 list_id INT NOT NULL,
                 movie_id INT NOT NULL,
                 added_by INT NOT NULL,
+                notes VARCHAR(500) NULL,
+                position INT NULL,
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (list_id) REFERENCES collaborative_lists(list_id) ON DELETE CASCADE,
                 FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE,
