@@ -1,6 +1,7 @@
 ﻿# CineSense Startup Script (PowerShell) — CANONICAL launcher.
 # Run this script to start the CineSense application.
-# (start-cinesense.ps1 delegates here; prefer this script.)
+# (The old start-cinesense.ps1 wrapper was removed on 2026-10-19; use this
+#  script directly.)
 #
 # Options:
 #   [1] Fully Integrated App with ALL Features (app_integrated.py)  <-- default

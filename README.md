@@ -3,15 +3,12 @@
 Pairwise-comparison recommender (Flask + MySQL 8.0 + PyTorch) on MovieLens + TMDB.
 Asks "which movie do you prefer?", learns ELO taste, serves hybrid neural + content picks.
 
-## Docs
+## Docs (3 files, merged 2026-10-19)
 
-- [Overview](docs/overview.md) — what it is, problems, objectives
-- [Architecture](docs/architecture.md) — system design, stack, modules
-- [Data & Methods](docs/methods.md) — datasets, pipeline, models
-- [Database & API](docs/database-api.md) — schema (36 tables, 24 views, 24 procedures, 8 functions, 11 triggers) + 55 `/api` endpoints
-- [Setup & Deployment](docs/setup.md) — install, run, deploy
-- [Test Results](docs/results.md) — reproduced benchmarks (popularity NDCG@10 0.094 beats hybrid 0.030; hybrid wins coverage 5.5×)
-- [Full Audit](docs/AUDIT.md) — 651 findings with file:line (bugs, inconsistencies, robustness)
+- [Project Reference](docs/PROJECT.md) — overview, architecture, methods, database & API, setup & deployment (merged: overview + architecture + methods + database-api + setup)
+- [Test Results](docs/RESULTS.md) — reproduced benchmarks (popularity NDCG@10 0.094 beats hybrid 0.030; hybrid wins coverage 5.5×)
+- [Audit Report 2026-10-19](docs/AUDIT-2026-10-19.md) — full audit ledger: 651 curated + 192 machine-scan + 26 addendum + 20 wave-4 findings, all fixed statuses, plus the complete original findings lists
+- [Model Artifacts](models/README.md) — every checkpoint: producer, consumer, reproduction
 
 ## Quick start
 
@@ -30,9 +27,15 @@ python app_integrated.py   # → http://localhost:5000
 | Best local ranker | Popularity NDCG@10 0.094 / Hit@10 0.40 (hybrid: 0.030 / 0.20, 5.5× coverage) |
 | Offline torch (32M, Kaggle rerun 2026-10-14) | Raw RMSE 0.77, ROC-AUC 0.8352 — research artifact, not in serving path |
 | Serving | 300-candidate funnel → top 20, retrieval p95 ~6ms |
-| Tests | 75 tests (60 in default scope), 7/7 live-server tests passed |
+| Tests | 83 test functions; latest run **65 passed / 24 skipped / 0 failed** |
+| Lint | pyflakes **0 findings** repo-wide |
 
 Torch checkpoints are offline-only (`USE_DL_SCORING=0` by default).
+
+## Codebase (verified 2026-10-19)
+
+149 tracked files · 96 Python files · 28,114 Python LOC · 36 tables / 24 views /
+24 procedures / 8 functions / 11 triggers · 69 URL rules (55 `/api` endpoints).
 
 ## References
 

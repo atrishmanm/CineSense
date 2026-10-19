@@ -1,4 +1,4 @@
-"""Generate machine-verified audit items (file:line precise) for docs/AUDIT.md."""
+"""Generate machine-verified audit items (file:line precise) for docs/AUDIT-2026-10-19.md."""
 import os
 import re
 

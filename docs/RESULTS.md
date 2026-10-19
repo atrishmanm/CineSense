@@ -90,8 +90,10 @@ pytest -q                                   # unit/integration (DB-free subset p
 
 ## 8. Test suite
 
-`pytest -q` collects **88 tests** across 10 `test_*.py` files in `tests/`.
-Latest verified run: **64 passed, 24 skipped** (Oct 2026) — skips are
-live-server-gated, optional-dependency, and offline-skip tests.
+`tests/` contains **83 `def test_*` functions** across 10 `test_*.py` files.
+Latest verified run (2026-10-19): **65 passed, 24 skipped, 0 failed**
+(89 collected items — the deltas come from pytest idiom differences).
+Skips are live-server-gated, optional-dependency, and offline-skip tests.
+Earlier waves reported 58–64 passing before the remaining fixes landed.
 
 [<- Back to README](../README.md)

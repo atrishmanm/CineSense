@@ -31,8 +31,8 @@
 28. ./ai/netflix_recommender.py:173 — empty return in ai/ — may hide failure (verify logged)
 29. ./ai/netflix_recommender.py:190 — empty return in ai/ — may hide failure (verify logged)
 30. ./ai/netflix_recommender.py:225 — empty return in ai/ — may hide failure (verify logged)
-31. ./ai/recommender.py:580 — empty return in ai/ — may hide failure (verify logged)
-32. ./ai/recommender.py:1312 — empty return in ai/ — may hide failure (verify logged)
+31. ./ai/recommender.py:586 — empty return in ai/ — may hide failure (verify logged)
+32. ./ai/recommender.py:1318 — empty return in ai/ — may hide failure (verify logged)
 33. ./ai/redis_cache.py:116 — empty return in ai/ — may hide failure (verify logged)
 34. ./ai/redis_cache.py:125 — empty return in ai/ — may hide failure (verify logged)
 35. ./ai/redis_cache.py:128 — empty return in ai/ — may hide failure (verify logged)
@@ -61,127 +61,129 @@
 58. ./ai/trending_detector.py:313 — empty return in ai/ — may hide failure (verify logged)
 59. ./ai/trending_detector.py:378 — empty return in ai/ — may hide failure (verify logged)
 60. ./ai/vector_search.py:93 — empty return in ai/ — may hide failure (verify logged)
-61. ./ai/visual_search.py:89 — empty return in ai/ — may hide failure (verify logged)
-62. ./ai/visual_search.py:216 — empty return in ai/ — may hide failure (verify logged)
-63. ./ai/visual_search.py:251 — empty return in ai/ — may hide failure (verify logged)
-64. ./ai/visual_search.py:275 — empty return in ai/ — may hide failure (verify logged)
-65. ./ai/visual_search.py:305 — empty return in ai/ — may hide failure (verify logged)
-66. ./ai/visual_search.py:336 — empty return in ai/ — may hide failure (verify logged)
-67. ./ai/visual_search.py:348 — empty return in ai/ — may hide failure (verify logged)
-68. ./ai/visual_search.py:376 — empty return in ai/ — may hide failure (verify logged)
-69. ./ai/visual_search.py:415 — empty return in ai/ — may hide failure (verify logged)
-70. ./ai/visual_search.py:438 — empty return in ai/ — may hide failure (verify logged)
-71. ./ai/visual_search.py:442 — empty return in ai/ — may hide failure (verify logged)
-72. ./ai/visual_search.py:447 — empty return in ai/ — may hide failure (verify logged)
-73. ./ai/visual_search.py:451 — empty return in ai/ — may hide failure (verify logged)
+61. ./ai/visual_search.py:96 — empty return in ai/ — may hide failure (verify logged)
+62. ./ai/visual_search.py:223 — empty return in ai/ — may hide failure (verify logged)
+63. ./ai/visual_search.py:258 — empty return in ai/ — may hide failure (verify logged)
+64. ./ai/visual_search.py:282 — empty return in ai/ — may hide failure (verify logged)
+65. ./ai/visual_search.py:312 — empty return in ai/ — may hide failure (verify logged)
+66. ./ai/visual_search.py:343 — empty return in ai/ — may hide failure (verify logged)
+67. ./ai/visual_search.py:355 — empty return in ai/ — may hide failure (verify logged)
+68. ./ai/visual_search.py:383 — empty return in ai/ — may hide failure (verify logged)
+69. ./ai/visual_search.py:422 — empty return in ai/ — may hide failure (verify logged)
+70. ./ai/visual_search.py:445 — empty return in ai/ — may hide failure (verify logged)
+71. ./ai/visual_search.py:449 — empty return in ai/ — may hide failure (verify logged)
+72. ./ai/visual_search.py:454 — empty return in ai/ — may hide failure (verify logged)
+73. ./ai/visual_search.py:458 — empty return in ai/ — may hide failure (verify logged)
 74. ./ai/xfetch_cache.py:157 — empty return in ai/ — may hide failure (verify logged)
 
-## localhost (17)
+## localhost (16)
 75. ./ai/redis_cache.py:32 — hardcoded localhost URL
-76. ./app_integrated.py:224 — hardcoded localhost URL
-77. ./config.py:24 — hardcoded localhost URL
-78. ./config.py:38 — hardcoded localhost URL
-79. ./inference/torchserve_handler.py:325 — hardcoded localhost URL
-80. ./scripts/apply_lock_fix.py:10 — hardcoded localhost URL
-81. ./scripts/check_trending_cols.py:10 — hardcoded localhost URL
-82. ./scripts/fill_all_tables.py:9 — hardcoded localhost URL
-83. ./scripts/fill_all_tables.py:393 — hardcoded localhost URL
-84. ./scripts/scan_sql_cols.py:10 — hardcoded localhost URL
-85. ./scripts/verify_candidates.py:9 — hardcoded localhost URL
-86. ./scripts/verify_db.py:9 — hardcoded localhost URL
-87. ./scripts/verify_trending.py:10 — hardcoded localhost URL
-88. ./serving/model_handler.py:330 — hardcoded localhost URL
-89. ./serving/model_handler.py:337 — hardcoded localhost URL
-90. ./serving/model_handler.py:342 — hardcoded localhost URL
-91. ./training/distributed_training.py:44 — hardcoded localhost URL
+76. ./config.py:24 — hardcoded localhost URL
+77. ./config.py:36 — hardcoded localhost URL
+78. ./inference/torchserve_handler.py:370 — hardcoded localhost URL
+79. ./scripts/apply_lock_fix.py:10 — hardcoded localhost URL
+80. ./scripts/check_trending_cols.py:10 — hardcoded localhost URL
+81. ./scripts/fill_all_tables.py:9 — hardcoded localhost URL
+82. ./scripts/fill_all_tables.py:393 — hardcoded localhost URL
+83. ./scripts/scan_sql_cols.py:10 — hardcoded localhost URL
+84. ./scripts/verify_candidates.py:9 — hardcoded localhost URL
+85. ./scripts/verify_db.py:9 — hardcoded localhost URL
+86. ./scripts/verify_trending.py:10 — hardcoded localhost URL
+87. ./serving/model_handler.py:330 — hardcoded localhost URL
+88. ./serving/model_handler.py:337 — hardcoded localhost URL
+89. ./serving/model_handler.py:342 — hardcoded localhost URL
+90. ./training/distributed_training.py:44 — hardcoded localhost URL
 
 ## magic-number (12)
-92. ./ai/multi_stage_ranker.py:91 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-93. ./ai/recommender.py:36 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-94. ./benchmarks/recommenders.py:152 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-95. ./benchmarks/run_scale_benchmark.py:155 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-96. ./benchmarks/stage_retrieval_benchmark.py:58 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-97. ./benchmarks/stage_retrieval_benchmark.py:61 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-98. ./benchmarks/stage_retrieval_benchmark.py:63 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-99. ./benchmarks/stage_retrieval_benchmark.py:160 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-100. ./config.py:61 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+91. ./ai/multi_stage_ranker.py:84 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+92. ./ai/recommender.py:36 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+93. ./benchmarks/recommenders.py:152 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+94. ./benchmarks/run_scale_benchmark.py:155 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+95. ./benchmarks/stage_retrieval_benchmark.py:58 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+96. ./benchmarks/stage_retrieval_benchmark.py:61 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+97. ./benchmarks/stage_retrieval_benchmark.py:63 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+98. ./benchmarks/stage_retrieval_benchmark.py:160 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+99. ./config.py:59 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+100. ./config.py:70 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
 101. ./config.py:72 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-102. ./config.py:74 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
-103. ./scripts/generate_schema_diagram.py:152 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
+102. ./scripts/generate_schema_diagram.py:152 — hardcoded 1500 (ELO start — should be Config.INITIAL_ELO_SCORE)
 
 ## select-star (23)
-104. ./api/routes.py:96 — `SELECT *` — breaks on schema change, hides column use
-105. ./api/social_routes.py:43 — `SELECT *` — breaks on schema change, hides column use
-106. ./api/social_routes.py:62 — `SELECT *` — breaks on schema change, hides column use
-107. ./api/social_routes.py:130 — `SELECT *` — breaks on schema change, hides column use
-108. ./api/social_routes.py:140 — `SELECT *` — breaks on schema change, hides column use
-109. ./api/social_routes.py:210 — `SELECT *` — breaks on schema change, hides column use
-110. ./database/db_manager.py:130 — `SELECT *` — breaks on schema change, hides column use
-111. ./database/db_manager.py:137 — `SELECT *` — breaks on schema change, hides column use
-112. ./database/db_manager.py:188 — `SELECT *` — breaks on schema change, hides column use
-113. ./database/db_manager.py:215 — `SELECT *` — breaks on schema change, hides column use
-114. ./database/db_manager.py:249 — `SELECT *` — breaks on schema change, hides column use
-115. ./database/db_manager.py:331 — `SELECT *` — breaks on schema change, hides column use
-116. ./database/db_manager.py:359 — `SELECT *` — breaks on schema change, hides column use
-117. ./database/db_manager.py:458 — `SELECT *` — breaks on schema change, hides column use
-118. ./database/db_manager.py:545 — `SELECT *` — breaks on schema change, hides column use
-119. ./database/db_manager.py:684 — `SELECT *` — breaks on schema change, hides column use
-120. ./database/db_manager.py:691 — `SELECT *` — breaks on schema change, hides column use
-121. ./database/db_manager.py:698 — `SELECT *` — breaks on schema change, hides column use
-122. ./database/db_manager.py:705 — `SELECT *` — breaks on schema change, hides column use
-123. ./database/db_manager.py:728 — `SELECT *` — breaks on schema change, hides column use
-124. ./database/db_manager.py:731 — `SELECT *` — breaks on schema change, hides column use
-125. ./database/db_manager.py:795 — `SELECT *` — breaks on schema change, hides column use
-126. ./database/db_manager.py:845 — `SELECT *` — breaks on schema change, hides column use
+103. ./api/routes.py:96 — `SELECT *` — breaks on schema change, hides column use
+104. ./api/social_routes.py:43 — `SELECT *` — breaks on schema change, hides column use
+105. ./api/social_routes.py:62 — `SELECT *` — breaks on schema change, hides column use
+106. ./api/social_routes.py:130 — `SELECT *` — breaks on schema change, hides column use
+107. ./api/social_routes.py:140 — `SELECT *` — breaks on schema change, hides column use
+108. ./api/social_routes.py:210 — `SELECT *` — breaks on schema change, hides column use
+109. ./database/db_manager.py:130 — `SELECT *` — breaks on schema change, hides column use
+110. ./database/db_manager.py:137 — `SELECT *` — breaks on schema change, hides column use
+111. ./database/db_manager.py:188 — `SELECT *` — breaks on schema change, hides column use
+112. ./database/db_manager.py:215 — `SELECT *` — breaks on schema change, hides column use
+113. ./database/db_manager.py:249 — `SELECT *` — breaks on schema change, hides column use
+114. ./database/db_manager.py:349 — `SELECT *` — breaks on schema change, hides column use
+115. ./database/db_manager.py:377 — `SELECT *` — breaks on schema change, hides column use
+116. ./database/db_manager.py:476 — `SELECT *` — breaks on schema change, hides column use
+117. ./database/db_manager.py:563 — `SELECT *` — breaks on schema change, hides column use
+118. ./database/db_manager.py:702 — `SELECT *` — breaks on schema change, hides column use
+119. ./database/db_manager.py:709 — `SELECT *` — breaks on schema change, hides column use
+120. ./database/db_manager.py:716 — `SELECT *` — breaks on schema change, hides column use
+121. ./database/db_manager.py:723 — `SELECT *` — breaks on schema change, hides column use
+122. ./database/db_manager.py:746 — `SELECT *` — breaks on schema change, hides column use
+123. ./database/db_manager.py:749 — `SELECT *` — breaks on schema change, hides column use
+124. ./database/db_manager.py:813 — `SELECT *` — breaks on schema change, hides column use
+125. ./database/db_manager.py:863 — `SELECT *` — breaks on schema change, hides column use
 
 ## sleep (23)
-127. ./ai/content_pipeline.py:64 — blocking sleep (retry/backoff without jitter, or test slowdown)
-128. ./ai/content_pipeline.py:112 — blocking sleep (retry/backoff without jitter, or test slowdown)
-129. ./ai/content_pipeline.py:127 — blocking sleep (retry/backoff without jitter, or test slowdown)
-130. ./ai/content_pipeline.py:143 — blocking sleep (retry/backoff without jitter, or test slowdown)
-131. ./ai/content_pipeline.py:150 — blocking sleep (retry/backoff without jitter, or test slowdown)
-132. ./ai/content_pipeline.py:188 — blocking sleep (retry/backoff without jitter, or test slowdown)
-133. ./ai/content_pipeline.py:221 — blocking sleep (retry/backoff without jitter, or test slowdown)
-134. ./ai/content_pipeline.py:268 — blocking sleep (retry/backoff without jitter, or test slowdown)
-135. ./ai/content_pipeline.py:391 — blocking sleep (retry/backoff without jitter, or test slowdown)
-136. ./benchmarks/run_scale_benchmark.py:117 — blocking sleep (retry/backoff without jitter, or test slowdown)
-137. ./scripts/fetch_tv_series.py:49 — blocking sleep (retry/backoff without jitter, or test slowdown)
-138. ./scripts/fetch_tv_series.py:62 — blocking sleep (retry/backoff without jitter, or test slowdown)
-139. ./scripts/fetch_tv_series.py:96 — blocking sleep (retry/backoff without jitter, or test slowdown)
-140. ./scripts/fill_all_tables.py:77 — blocking sleep (retry/backoff without jitter, or test slowdown)
-141. ./tests/test_ai_comprehensive.py:279 — blocking sleep (retry/backoff without jitter, or test slowdown)
-142. ./tests/test_scale_architecture.py:85 — blocking sleep (retry/backoff without jitter, or test slowdown)
-143. ./tests/test_scale_architecture.py:115 — blocking sleep (retry/backoff without jitter, or test slowdown)
-144. ./tests/test_scale_architecture.py:130 — blocking sleep (retry/backoff without jitter, or test slowdown)
-145. ./tmdb/fetcher.py:220 — blocking sleep (retry/backoff without jitter, or test slowdown)
-146. ./tmdb/fetcher.py:302 — blocking sleep (retry/backoff without jitter, or test slowdown)
-147. ./tmdb/fetcher.py:314 — blocking sleep (retry/backoff without jitter, or test slowdown)
-148. ./tmdb/fetcher.py:332 — blocking sleep (retry/backoff without jitter, or test slowdown)
-149. ./tmdb/fetcher.py:355 — blocking sleep (retry/backoff without jitter, or test slowdown)
+126. ./ai/content_pipeline.py:64 — blocking sleep (retry/backoff without jitter, or test slowdown)
+127. ./ai/content_pipeline.py:112 — blocking sleep (retry/backoff without jitter, or test slowdown)
+128. ./ai/content_pipeline.py:127 — blocking sleep (retry/backoff without jitter, or test slowdown)
+129. ./ai/content_pipeline.py:143 — blocking sleep (retry/backoff without jitter, or test slowdown)
+130. ./ai/content_pipeline.py:150 — blocking sleep (retry/backoff without jitter, or test slowdown)
+131. ./ai/content_pipeline.py:188 — blocking sleep (retry/backoff without jitter, or test slowdown)
+132. ./ai/content_pipeline.py:221 — blocking sleep (retry/backoff without jitter, or test slowdown)
+133. ./ai/content_pipeline.py:268 — blocking sleep (retry/backoff without jitter, or test slowdown)
+134. ./ai/content_pipeline.py:391 — blocking sleep (retry/backoff without jitter, or test slowdown)
+135. ./benchmarks/run_scale_benchmark.py:117 — blocking sleep (retry/backoff without jitter, or test slowdown)
+136. ./scripts/fetch_tv_series.py:49 — blocking sleep (retry/backoff without jitter, or test slowdown)
+137. ./scripts/fetch_tv_series.py:62 — blocking sleep (retry/backoff without jitter, or test slowdown)
+138. ./scripts/fetch_tv_series.py:96 — blocking sleep (retry/backoff without jitter, or test slowdown)
+139. ./scripts/fill_all_tables.py:77 — blocking sleep (retry/backoff without jitter, or test slowdown)
+140. ./tests/test_ai_comprehensive.py:279 — blocking sleep (retry/backoff without jitter, or test slowdown)
+141. ./tests/test_scale_architecture.py:85 — blocking sleep (retry/backoff without jitter, or test slowdown)
+142. ./tests/test_scale_architecture.py:115 — blocking sleep (retry/backoff without jitter, or test slowdown)
+143. ./tests/test_scale_architecture.py:130 — blocking sleep (retry/backoff without jitter, or test slowdown)
+144. ./tmdb/fetcher.py:221 — blocking sleep (retry/backoff without jitter, or test slowdown)
+145. ./tmdb/fetcher.py:324 — blocking sleep (retry/backoff without jitter, or test slowdown)
+146. ./tmdb/fetcher.py:336 — blocking sleep (retry/backoff without jitter, or test slowdown)
+147. ./tmdb/fetcher.py:354 — blocking sleep (retry/backoff without jitter, or test slowdown)
+148. ./tmdb/fetcher.py:377 — blocking sleep (retry/backoff without jitter, or test slowdown)
 
-## unvalidated-input (24)
-150. ./api/routes.py:52 — untrusted request body — check for None/type validation
-151. ./api/routes.py:533 — untrusted `request.args.get(` — check for caps/validation
-152. ./api/routes.py:564 — untrusted `request.args.get(` — check for caps/validation
-153. ./api/routes.py:565 — untrusted `request.args.get(` — check for caps/validation
-154. ./api/routes.py:695 — untrusted `request.args.get(` — check for caps/validation
-155. ./api/routes.py:698 — untrusted `request.args.get(` — check for caps/validation
-156. ./api/routes.py:809 — untrusted `request.args.get(` — check for caps/validation
-157. ./api/routes.py:853 — untrusted `request.args.get(` — check for caps/validation
-158. ./api/routes.py:854 — untrusted `request.args.get(` — check for caps/validation
+## unvalidated-input (27)
+149. ./api/routes.py:52 — untrusted request body — check for None/type validation
+150. ./api/routes.py:533 — untrusted `request.args.get(` — check for caps/validation
+151. ./api/routes.py:564 — untrusted `request.args.get(` — check for caps/validation
+152. ./api/routes.py:565 — untrusted `request.args.get(` — check for caps/validation
+153. ./api/routes.py:695 — untrusted `request.args.get(` — check for caps/validation
+154. ./api/routes.py:698 — untrusted `request.args.get(` — check for caps/validation
+155. ./api/routes.py:809 — untrusted `request.args.get(` — check for caps/validation
+156. ./api/routes.py:853 — untrusted `request.args.get(` — check for caps/validation
+157. ./api/routes.py:854 — untrusted `request.args.get(` — check for caps/validation
+158. ./api/routes.py:855 — untrusted `request.args.get(` — check for caps/validation
 159. ./api/routes.py:856 — untrusted `request.args.get(` — check for caps/validation
 160. ./api/routes.py:857 — untrusted `request.args.get(` — check for caps/validation
-161. ./api/routes.py:905 — untrusted `request.args.get(` — check for caps/validation
-162. ./api/routes.py:1308 — untrusted `request.args.get(` — check for caps/validation
-163. ./api/routes.py:1310 — untrusted `request.args.get(` — check for caps/validation
-164. ./api/routes.py:1313 — untrusted `request.args.get(` — check for caps/validation
-165. ./api/routes.py:1399 — untrusted `request.args.get(` — check for caps/validation
-166. ./api/routes.py:1400 — untrusted `request.args.get(` — check for caps/validation
-167. ./api/routes.py:1403 — untrusted `request.args.get(` — check for caps/validation
-168. ./api/routes.py:1404 — untrusted `request.args.get(` — check for caps/validation
-169. ./api/routes.py:1504 — untrusted `request.args.get(` — check for caps/validation
-170. ./api/social_routes.py:20 — untrusted request body — check for None/type validation
-171. ./api/social_routes.py:319 — untrusted `request.args.get(` — check for caps/validation
-172. ./app_integrated.py:36 — untrusted request body — check for None/type validation
-173. ./app_integrated.py:495 — untrusted `request.args.get(` — check for caps/validation
+161. ./api/routes.py:859 — untrusted `request.args.get(` — check for caps/validation
+162. ./api/routes.py:860 — untrusted `request.args.get(` — check for caps/validation
+163. ./api/routes.py:929 — untrusted `request.args.get(` — check for caps/validation
+164. ./api/routes.py:1332 — untrusted `request.args.get(` — check for caps/validation
+165. ./api/routes.py:1334 — untrusted `request.args.get(` — check for caps/validation
+166. ./api/routes.py:1337 — untrusted `request.args.get(` — check for caps/validation
+167. ./api/routes.py:1423 — untrusted `request.args.get(` — check for caps/validation
+168. ./api/routes.py:1424 — untrusted `request.args.get(` — check for caps/validation
+169. ./api/routes.py:1427 — untrusted `request.args.get(` — check for caps/validation
+170. ./api/routes.py:1428 — untrusted `request.args.get(` — check for caps/validation
+171. ./api/routes.py:1528 — untrusted `request.args.get(` — check for caps/validation
+172. ./api/social_routes.py:20 — untrusted request body — check for None/type validation
+173. ./api/social_routes.py:319 — untrusted `request.args.get(` — check for caps/validation
+174. ./app_integrated.py:35 — untrusted request body — check for None/type validation
+175. ./app_integrated.py:490 — untrusted `request.args.get(` — check for caps/validation
 

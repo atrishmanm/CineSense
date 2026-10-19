@@ -1,4 +1,4 @@
-"""Verify live DB object counts against docs/database-api.md claims."""
+"""Verify live DB object counts against docs/PROJECT.md claims."""
 import os
 from dotenv import load_dotenv
 load_dotenv()
