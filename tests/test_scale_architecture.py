@@ -13,6 +13,7 @@ Unit tests for CineSense production-scale architectural subsystems:
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -74,7 +75,7 @@ class TestXFetchAndSingleflight:
         sf = Singleflight()
         calls = 0
         counter_lock = threading.Lock()
-        start_barrier = threading.Barrier(5)
+        start_barrier = threading.Barrier(20)
 
         def worker():
             nonlocal calls
@@ -93,14 +94,13 @@ class TestXFetchAndSingleflight:
             with results_lock:
                 results.append(value)
 
-        threads = [threading.Thread(target=caller) for _ in range(5)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = [executor.submit(caller) for _ in range(20)]
+            for future in futures:
+                future.result()
 
-        assert results == [42] * 5
-        # All 5 concurrent callers must share a single execution.
+        assert results == [42] * 20
+        # All 20 concurrent callers must share a single execution.
         assert calls == 1
 
     def test_xfetch_cache_hit_and_expiration(self):
@@ -114,6 +114,25 @@ class TestXFetchAndSingleflight:
         assert cache.get("k2") == "v2"
         time.sleep(0.3)
         assert cache.get("k2") is None
+
+    def test_xfetch_expiration_triggers_recompute(self):
+        cache = XFetchCache(max_size=10, default_ttl_sec=300.0)
+        counter = 0
+
+        def compute_fn():
+            nonlocal counter
+            counter += 1
+            return {"v": counter}
+
+        # delta=0.0 disables XFetch's probabilistic early refresh window.
+        cache.set("rk", "first", ttl_sec=0.05, delta=0.0)
+        assert cache.get("rk") == "first"
+        time.sleep(0.25)
+
+        # Expired entry: get() with a compute_fn must recompute and re-cache.
+        assert cache.get("rk", compute_fn=compute_fn) == {"v": 1}
+        assert counter == 1
+        assert cache.get("rk") == {"v": 1}
 
 
 class TestMultiStageRanker:

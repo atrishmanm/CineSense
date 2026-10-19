@@ -62,9 +62,10 @@ GET /api/recommendations
   `ab_experimentation`, `evaluation`, `inference_pipeline`,
   `training_pipeline`, `netflix_recommender`, `content_pipeline`,
   `data_preprocessor`
-- `training/` — 9 files: `models`, `advanced_models`, `advanced_models_v2`,
-  `losses` (Focal/Weighted/Ranking/Combined/BPR/Listwise), `train`,
-  `advanced_training`, `sequential_model`, `distributed_training`
+- `training/` — 11 files: `models`, `advanced_models`, `advanced_models_v2`,
+  `deep_v3`, `losses` (Focal/Weighted/Ranking/Combined/BPR/Listwise), `train`,
+  `train_100k`, `advanced_training`, `sequential_model`,
+  `distributed_training`, `colab_train_100k.ipynb`
 - `api/` — `routes.py` (34 routes), `social_routes.py`
 - `preprocessing/` — `merge_datasets.py`, `feature_engineering.py`
 - `benchmarks/` — 12 scripts incl. `run_comprehensive_evaluation.py`, `run_32m_benchmarks.py`

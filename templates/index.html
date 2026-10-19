@@ -676,7 +676,12 @@
             const response = await fetch(url);
             const data = await response.json();
             let movies = data.movies || [];
-            
+
+            // Advance the offset by the RAW page size: the dedupe filter below
+            // can remove all rows on an all-duplicate page, and advancing by
+            // the deduped count would refetch the same window forever.
+            const rawCount = movies.length;
+
             // Filter out duplicates
             movies = movies.filter(movie => {
                 if (loadedMovieIds.has(movie.movie_id)) {
@@ -685,15 +690,15 @@
                 loadedMovieIds.add(movie.movie_id);
                 return true;
             });
-            
+
             if (movies.length > 0) {
                 const container = document.getElementById(`${sectionName}-scroll`);
                 movies.forEach(movie => {
                     container.innerHTML += createHorizontalCard(movie);
                 });
-                
+
                 section.loaded += movies.length;
-                section.offset += movies.length;
+                section.offset += rawCount;
             }
         } catch (error) {
             console.error(`Error loading more for ${sectionName}:`, error);

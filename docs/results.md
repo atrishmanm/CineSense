@@ -90,9 +90,8 @@ pytest -q                                   # unit/integration (DB-free subset p
 
 ## 8. Test suite
 
-`pytest.ini` collects 6 files (**60 tests** in scope), **75 test functions** total across `tests/`.
-DB-free subset (`test_pairwise`, `test_reinforcement`, `test_dependencies`):
-19 passed, 2 skipped (Oct 2026). `test_ai_comprehensive` / `test_features`
-(16 tests) need a live server and skip otherwise — 7/7 passed live Oct 2026.
+`pytest -q` collects **88 tests** across 10 `test_*.py` files in `tests/`.
+Latest verified run: **64 passed, 24 skipped** (Oct 2026) — skips are
+live-server-gated, optional-dependency, and offline-skip tests.
 
 [<- Back to README](../README.md)
