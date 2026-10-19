@@ -3,12 +3,20 @@ STEP 1-2: Data Merging - MovieLens + TMDB
 Critical step: Map MovieLens movieId → TMDB metadata
 """
 
+import os
+
 import pandas as pd
 from pathlib import Path
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# D407: single resolution point for the raw/derived data root.  The default
+# keeps the historical repo-relative ``data/`` layout; point CINESENSE_DATA_DIR
+# at an alternate copy of the raw data to rerun the pipeline without editing
+# these sources.
+DATA_DIR = Path(os.getenv("CINESENSE_DATA_DIR", "data"))
 
 
 def merge_movielens_tmdb():
@@ -22,9 +30,9 @@ def merge_movielens_tmdb():
     
     # Load MovieLens data
     logger.info("\nLoading MovieLens data...")
-    ratings = pd.read_csv("data/movie-lens_ml-32m/ratings.csv")
-    movies = pd.read_csv("data/movie-lens_ml-32m/movies.csv")
-    links = pd.read_csv("data/movie-lens_ml-32m/links.csv")
+    ratings = pd.read_csv(DATA_DIR / "movie-lens_ml-32m" / "ratings.csv")
+    movies = pd.read_csv(DATA_DIR / "movie-lens_ml-32m" / "movies.csv")
+    links = pd.read_csv(DATA_DIR / "movie-lens_ml-32m" / "links.csv")
     
     logger.info(f"✓ Ratings: {len(ratings):,} rows")
     logger.info(f"✓ Movies: {len(movies):,} rows")
@@ -32,7 +40,7 @@ def merge_movielens_tmdb():
     
     # Load TMDB data
     logger.info("\nLoading TMDB data...")
-    tmdb = pd.read_csv("data/tmdb/TMDB_movie_dataset_v11.csv", low_memory=False)
+    tmdb = pd.read_csv(DATA_DIR / "tmdb" / "TMDB_movie_dataset_v11.csv", low_memory=False)
     logger.info(f"✓ TMDB: {len(tmdb):,} rows")
     
     # Merge step 1: ratings + movies
@@ -98,7 +106,7 @@ def merge_movielens_tmdb():
     logger.info(f"Coverage: {merged_clean['overview'].ne('').sum() / len(merged_clean) * 100:.1f}%")
     
     # Save merged data
-    output_path = Path("data/merged.csv")
+    output_path = DATA_DIR / "merged.csv"
     logger.info(f"\nSaving to {output_path}...")
     merged_clean.to_csv(output_path, index=False)
     

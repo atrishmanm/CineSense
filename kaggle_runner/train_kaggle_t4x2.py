@@ -24,7 +24,9 @@ Architectural Features:
    - Normalized Regression: RMSE (< 0.30 Target), MAE, MSE, R^2.
    - Raw Regression: RMSE, MAE, MSE, Pearson r.
    - Decision Support (Threshold >= 4.0): Accuracy, Precision, Recall, F1, Specificity, Balanced Acc, ROC-AUC, PR-AUC, MCC.
-   - Top-10 Ranking on 500+ held-out users: NDCG@10, Hit Rate@10, Precision@10, Recall@10.
+   - Top-10 Ranking on a capped cohort (first 550 held-out users, users
+     without held-out positives skipped), 500-candidate pool from the first
+     3000 catalog ids: NDCG@10, Hit Rate@10, Precision@10, Recall@10.
    - Beyond-Accuracy: Catalog Coverage, Novelty (Mean Self-Information).
 """
 
@@ -633,7 +635,7 @@ def main() -> None:
     mcc = float(((tp * tn) - (fp * fn)) / denom_mcc) if denom_mcc > 0 else 0.0
 
     # 4. Top-10 Ranking on 500+ Held-Out Users
-    print("\n>> Evaluating Top-10 Ranking on 550 Held-Out Users with 500 Candidate Pool...")
+    print("\n>> Evaluating Top-10 Ranking: first 550 held-out users (users without held-out positives are skipped), 500-candidate pool from the first 3000 catalog ids...")
     test_user_ids = np.unique(test_u)
     eval_user_ids = test_user_ids[:min(len(test_user_ids), 550)]
 
@@ -767,7 +769,12 @@ def main() -> None:
             "mcc": round(mcc, 4),
         },
         "ranking_500_users": {
-            "evaluated_users": len(eval_user_ids),
+            # D374/D363 honesty: the candidate pool is the first-3000 catalog
+            # head slice and users without held-out positives are skipped, so
+            # evaluated_users below is the number actually ranked (not the
+            # 550-user cap) and the metrics are not a full-catalog ranking.
+            "evaluated_users": len(ndcg_list),
+            "candidate_pool_source": "500 candidates from the first 3000 catalog ids (head slice, not full catalog)",
             "ndcg@10": round(mean_ndcg10, 4),
             "hit_rate@10": round(mean_hr10, 4),
             "precision@10": round(mean_p10, 4),

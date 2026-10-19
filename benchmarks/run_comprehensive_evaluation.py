@@ -400,6 +400,10 @@ def run_comprehensive_evaluation():
 
         # Normalized Regression Metrics [0, 1] target utility scale: (r - 1) / 4
         # Proves RMSE < 0.5 (standard in modern deep ranking CTR/utility architectures)
+        # D364: ML-100K mapping (ratings span 1..5). The ML-32M runners use
+        # (r - 0.5) / 4.5 (ratings span 0.5..5.0); do not compare the two
+        # "normalized" metric blocks directly -- the mappings and thresholds
+        # differ.
         y_test_norm = [(r - 1.0) / 4.0 for r in y_test_true]
         y_pred_norm = [np.clip((p - 1.0) / 4.0, 0.0, 1.0) for p in y_pred]
         reg_norm = calculate_regression_metrics(y_test_norm, y_pred_norm)
@@ -487,6 +491,8 @@ def run_comprehensive_evaluation():
         f.write("> **Relevance Threshold:** Rating >= 4.0 stars (Positive interaction / User Liked)\n\n")
 
         f.write("## 1A. Normalized Target Rating Prediction (Utility Scale [0, 1] — RMSE < 0.5 Target)\n\n")
+        f.write("> Mapping: `(r - 1) / 4` for ML-100K (ratings 1..5). The ML-32M runners report `(r - 0.5) / 4.5` "
+                "separately with a `< 0.30/0.50` threshold; the two normalized blocks are not directly comparable.\n\n")
         f.write("| Model | Norm RMSE (v) [< 0.5] | Norm MAE (v) | Norm MSE | Norm R² Score (^) | Explained Var |\n")
         f.write("| :--- | :---: | :---: | :---: | :---: | :---: |\n")
         for name, data in all_results.items():

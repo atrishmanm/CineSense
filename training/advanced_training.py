@@ -222,16 +222,29 @@ def train_advanced_model(
     logger.info(f"Movies: {num_movies:,}")
     logger.info(f"Ratings: {len(df):,}")
     
-    # Time-based split (global chronological; NOT per-user — a user may be
-    # absent from one side of the boundary).
-    logger.info("\nCreating time-based train/validation split...")
-    df = df.sort_values("timestamp")
-    split_idx = int(len(df) * 0.8)
-    train_df = df.iloc[:split_idx]
-    val_df = df.iloc[split_idx:]
+    # Per-user chronological split (D350): the previous *global* timestamp
+    # split let individual users be absent from train entirely. Each user's
+    # history is sorted (stable kind="mergesort", so timestamp ties keep a
+    # deterministic order) and split 70/10/20 per user, mirroring
+    # benchmarks/data_loader.create_splits; users with < 5 interactions go to
+    # train only. The 20% newest slice is held out and unused here.
+    logger.info("\nCreating per-user chronological train/val split (70/10/20)...")
+    df = df.sort_values(["user_idx", "timestamp"], kind="mergesort")
+
+    _sizes = df.groupby("user_idx", sort=False)["rating"].transform("size").to_numpy()
+    _rank = df.groupby("user_idx", sort=False).cumcount().to_numpy()
+    _n_test = np.maximum(1, (_sizes * 0.20).astype(np.int64))
+    _n_val = np.maximum(1, (_sizes * 0.10).astype(np.int64))
+    _n_train = _sizes - _n_test - _n_val
+    _too_short = _sizes < 5
+
+    train_df = df[((_rank < _n_train) & ~_too_short) | _too_short]
+    val_df = df[~_too_short & (_rank >= _n_train) & (_rank < _n_train + _n_val)]
+    _held_out_test = df[~_too_short & (_rank >= _n_train + _n_val)]
     
     logger.info(f"Train: {len(train_df):,} ratings")
     logger.info(f"Val: {len(val_df):,} ratings")
+    logger.info(f"Held-out test (unused): {len(_held_out_test):,} ratings")
     
     # Load plot embeddings if using hybrid model
     plot_embeddings = None

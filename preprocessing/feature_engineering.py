@@ -4,6 +4,8 @@ STEP 3: Feature Engineering
 - Generate plot embeddings using transformers
 """
 
+import os
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
@@ -14,6 +16,10 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# D407: data root resolution -- the default keeps the repo-relative ``data/``
+# layout; set CINESENSE_DATA_DIR to rerun against an alternate data copy.
+DATA_DIR = Path(os.getenv("CINESENSE_DATA_DIR", "data"))
 
 
 def encode_users_and_movies():
@@ -26,7 +32,7 @@ def encode_users_and_movies():
     logger.info("="*80)
     
     # Load merged data
-    df = pd.read_csv("data/merged.csv")
+    df = pd.read_csv(DATA_DIR / "merged.csv")
     logger.info(f"Loaded {len(df):,} ratings")
     
     # Create encoders
@@ -59,7 +65,7 @@ def encode_users_and_movies():
     logger.info("\n✓ Saved encoders to model/mappings.pkl")
     
     # Save encoded data
-    df.to_csv("data/encoded.csv", index=False)
+    df.to_csv(DATA_DIR / "encoded.csv", index=False)
     logger.info("✓ Saved encoded data to data/encoded.csv")
     
     return df, user_enc, movie_enc
@@ -76,7 +82,7 @@ def generate_plot_embeddings():
     logger.info("="*80)
     
     # Load data
-    df = pd.read_csv("data/encoded.csv")
+    df = pd.read_csv(DATA_DIR / "encoded.csv")
     
     # Get unique movies with their overviews
     logger.info("\nPreparing movie metadata...")

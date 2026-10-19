@@ -16,6 +16,7 @@ pipeline, otherwise ``initialize`` fails loudly with a clear message.
 
 import os
 import logging
+from pathlib import Path
 from typing import List, Dict
 
 import torch
@@ -60,6 +61,7 @@ class RecommenderHandler:
         if model_dir:
             candidates.append(os.path.join(model_dir, "cinesense_deep_v3_full32m_best.pt"))
             candidates.append(os.path.join(model_dir, "model.pth"))
+        candidates.extend(self._checkpoint_dir_candidates())
         candidates.extend(DEFAULT_CHECKPOINT_CANDIDATES)
 
         for cand in candidates:
@@ -73,6 +75,27 @@ class RecommenderHandler:
             "fresh clone; set MODEL_PATH=<path to *.pt> or run the Kaggle "
             "training pipeline (kaggle_runner/train_kaggle_t4x2.py) to produce one."
         )
+
+    @staticmethod
+    def _checkpoint_dir_candidates() -> List[str]:
+        """Glob ``config.CHECKPOINT_DIR`` for *.pt checkpoints, newest first
+        (D385).  Honors the CHECKPOINT_DIR env var first; config.py is an
+        optional import, so TorchServe workers without the app config still
+        work on the default 'checkpoints' dir."""
+        try:
+            from config import Config  # type: ignore  # optional in TorchServe workers
+            checkpoint_dir = Path(os.environ.get("CHECKPOINT_DIR") or Config.CHECKPOINT_DIR)
+        except Exception:
+            checkpoint_dir = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
+        try:
+            found = sorted(
+                (p for p in checkpoint_dir.glob("*.pt") if p.is_file()),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return []
+        return [str(p) for p in found]
 
     def initialize(self, context):
         """

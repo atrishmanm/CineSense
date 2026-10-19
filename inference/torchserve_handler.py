@@ -272,11 +272,26 @@ def export_model_for_torchserve(
         shutil.copy(src_genre, f"{output_dir}/genre_encoder.json")
         print(f"✓ Copied genre encoder: {src_genre}")
     else:
-        print(
-            "! WARNING: genre_encoder.json not found "
-            f"(looked in {src_genre}); the handler will run without genre "
-            "encoding. Copy/produce it before packaging."
-        )
+        # D386: the handler loads genre_encoder.json from the archive/model
+        # dir on initialize; without it content-feature encoding degrades
+        # silently. Write the canonical MovieLens-32M 20-genre vocabulary
+        # (the order used by the training pipelines) so the export is
+        # self-contained. Replace with the production encoder if it differs.
+        try:
+            from benchmarks.data_loader import GENRE_NAMES_32M as _genre_vocab
+        except ImportError:
+            _genre_vocab = []
+        if _genre_vocab:
+            with open(f"{output_dir}/genre_encoder.json", "w", encoding="utf-8") as fh:
+                json.dump({g: i for i, g in enumerate(_genre_vocab)}, fh, indent=2)
+            print(f"✓ Wrote default genre encoder (MovieLens-32M 20-genre order) to {output_dir}/genre_encoder.json")
+        else:
+            print(
+                "! WARNING: genre_encoder.json not found "
+                f"(looked in {src_genre}) and the default genre-vocabulary "
+                "import failed; the handler will run without genre encoding. "
+                "Copy/produce one before packaging."
+            )
 
     if os.path.exists(src_plot):
         shutil.copy(src_plot, f"{output_dir}/plot_embeddings.npy")

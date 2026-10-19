@@ -136,9 +136,11 @@ class BiasedMatrixFactorization:
         default_q = np.zeros(self.n_factors, dtype=np.float32)
 
         for epoch in range(self.n_epochs):
-            # Per-epoch seeded permutation: iterate a shuffled index order
-            # without mutating the shared ratings array in place.
-            order = rng.permutation(len(ratings_arr))
+            # Per-epoch reproducible permutation (D362): build the order from
+            # a generator seeded with (seed + epoch) each epoch so epoch order
+            # does not share one continuously-advancing RNG stream and is
+            # independent of how many draws the init above consumed.
+            order = np.random.RandomState(42 + epoch).permutation(len(ratings_arr))
             for k in order:
                 row = ratings_arr[k]
                 u, i, r = int(row[0]), int(row[1]), row[2]
@@ -415,9 +417,15 @@ def run_32m_benchmarks():
     print(f"  Test interactions:  {len(test_ratings):,}")
     print(f"  Total eligible users: {len(all_eval_users):,}")
 
-    # Ensure 500+ Evaluation Users (capped at the available eval-user count)!
-    eval_user_subset = all_eval_users[:min(520, len(all_eval_users))]
-    print(f"  Target Evaluation Users: {len(eval_user_subset)} users.")
+    # Ranking cohort (D374 honesty): we cap at 520 eligible users, users
+    # without held-out positives are skipped during ranking, and the actual
+    # ranked count is reported per model in
+    # top10_ranking_metrics.evaluated_users_count. The "500+" figure is a
+    # cohort cap, not the number of users the metrics average over. Sorted
+    # for a deterministic cohort across runs.
+    eval_user_subset = sorted(all_eval_users)[:min(520, len(all_eval_users))]
+    print(f"  Ranking cohort cap: {len(eval_user_subset)} eligible users "
+          f"(users without held-out positives are skipped during ranking).")
 
     # Ground truth structures
     test_relevant_items = defaultdict(set)
@@ -482,6 +490,13 @@ def run_32m_benchmarks():
             "evaluation_users_count": len(eval_user_subset),
             "candidate_retrieval_pool_k": 500,
             "candidate_pool_source": "first 3000 catalog ids (head slice, not full catalog)",
+            "ranking_cohort_cap": len(eval_user_subset),
+            "ranking_metrics_scope": "@10 metrics on a 500-candidate pool from the top-3000 catalog slice (rated pool), NOT a full 32M-catalog ranking",
+            # D364: this file normalizes with (r - 0.5) / 4.5 because ML-32M
+            # ratings span 0.5..5.0. The ML-100K comprehensive benchmark uses
+            # (r - 1) / 4 (ratings 1..5). Do NOT compare "normalized" RMSEs
+            # across the two mappings.
+            "normalized_scale_mapping": "(r - 0.5) / 4.5 (native 0.5-5.0 ratings; ML-100K benchmark uses (r - 1) / 4)",
             "bootstrap_iterations": 500,
             "relevance_threshold": 4.0,
             "rmse_target_threshold": 0.30,
@@ -584,6 +599,7 @@ def run_32m_benchmarks():
             },
             "top10_ranking_metrics": {
                 "evaluated_users_count": len(p10_list),
+                "ranking_pool": "@10 computed over a 500-candidate pool drawn from the first 3000 catalog ids (rated pool)",
                 "precision@10": round(float(np.mean(p10_list)), 4) if p10_list else 0.0,
                 "recall@10": round(float(np.mean(r10_list)), 4) if r10_list else 0.0,
                 "ndcg@10": round(float(np.mean(ndcg10_list)), 4) if ndcg10_list else 0.0,
@@ -605,10 +621,14 @@ def run_32m_benchmarks():
 
         results["models"][model.name] = model_results
 
-        print(f"    Normalized RMSE:  {norm_rmse:.4f}  [Target < 0.50: {'PASSED (VERIFIED)' if rmse_verified else 'FAILED'}]")
+        print(
+            f"    Normalized RMSE:  {norm_rmse:.4f}  "
+            f"[< 0.30: {'PASSED' if rmse_verified else 'FAILED'} | "
+            f"< 0.50: {'PASSED' if norm_rmse < 0.50 else 'FAILED'}]"
+        )
         print(f"    Raw RMSE:         {reg_raw['rmse']:.4f}")
         print(f"    ROC-AUC:          {cls_metrics['roc_auc']:.4f}")
-        print(f"    NDCG@10:          {np.mean(ndcg10_list):.4f}")
+        print(f"    NDCG@10:          {np.mean(ndcg10_list):.4f}  (top-3000 catalog slice, 500-candidate pool)")
         print(f"    Hit Rate@10:      {np.mean(hr10_list)*100:.2f}%")
         print(f"    Coverage@10:      {cov*100:.2f}%")
         print(f"    Throughput (QPS): {qps:.1f}")
@@ -691,7 +711,7 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         "",
         "---",
         "",
-        "## 4. Top-10 Ranking Quality & Distributional Beyond-Accuracy",
+        "## 4. Top-10 Ranking Quality (500-candidate pool from the top-3000 catalog slice) & Distributional Beyond-Accuracy",
         "",
         "| Architecture | NDCG@10 (^) | Hit Rate@10 (^) | Precision@10 | Recall@10 | Coverage@10 (^) | Gini (v) | Novelty (bits) | ILD |",
         "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
@@ -714,7 +734,10 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         "",
         "1. **Pairwise Preference Learning Scale:** Default `LEARNING_TARGET_COMPARISONS` is 500 comparisons for stable Bradley-Terry/ELO convergence (config value, not a measured result).",
         "2. **Candidate Retrieval Stage Scale:** Candidate pool $K_{\\text{cand}}$ is 500 candidates per inference query, drawn from the first 3000 catalog ids (a head-of-catalog slice, not a full-catalog ranking).",
-        f"3. **Sample Depth:** Evaluated on {meta['evaluation_users_count']} held-out users.",
+        f"3. **Sample Depth:** Rating metrics computed on {meta['ratings_ingested']:,} held-out test ratings; "
+        f"ranking cohort capped at {meta['evaluation_users_count']} eligible users (first N by user id, users without "
+        "held-out positives skipped) -- per-model actual ranked-user counts are in each model's "
+        "top10_ranking_metrics.evaluated_users_count.",
         f"4. **Normalized RMSE < 0.30 target:** Per-model status is in Table 1 above; CineSense Deep V3 surrogate norm RMSE in this run: {v3_rmse:.4f}. Raw RMSE is the meaningful scale — normalized values are for comparability only.",
         "5. **Dual T4x2 GPU Cloud Training:** Full PyTorch AMP FP16 DataParallel training on Kaggle Cloud GPU (offline artifact; see models/).",
         f"6. **MMR diversity gain:** Hardcoded default constant `MMR_DIVERSITY_GAIN = {MMR_DIVERSITY_GAIN}` (hand-set, not tuned on the evaluation split).",

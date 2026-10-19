@@ -2,12 +2,13 @@
 Advanced loss functions for recommendation training
 Improves RMSE by focusing on hard examples and better weighting
 
-STATUS: EXPERIMENTAL / UNUSED (D369/D370/D402).  Nothing in the repository
+STATUS: EXPERIMENTAL / UNUSED (D402).  Nothing in the repository
 imports these classes — ``get_loss_function`` is only exercised by this
 module's own ``__main__`` demo.  The training scripts use ``nn.MSELoss``
-(see ``training/train.py``, ``training/advanced_training.py``).  The math is
-kept for reference but has two known issues, documented on the classes
-below; do not adopt ``FocalMSELoss`` / ``CombinedLoss`` without fixing them.
+(see ``training/train.py``, ``training/advanced_training.py``).  The former
+D369 collapse (``FocalMSELoss`` losing all signal for ``mse < 1``) and the
+D370 incompatible-scale sum built into ``CombinedLoss`` are now fixed, but
+the classes remain unused/unvalidated on real training runs.
 """
 
 import torch
@@ -22,16 +23,23 @@ class FocalMSELoss(nn.Module):
     Traditional MSE treats all errors equally. Focal loss weights
     hard-to-predict examples more heavily, improving overall accuracy.
 
-    .. warning:: EXPERIMENTAL / UNUSED (D369). With the default ``beta=4.0``
-       and rating-scale errors (MSE typically < 1) the ``mse ** beta`` term
-       collapses the loss toward 0, so it does not behave like an MSE. On a
-       0..1 normalized target it is effectively non-informative. Left
-       unchanged for reference; fix the exponent or drop this class before
-       any real use.
+    D369 fix: the original weighting ``exp(-alpha * mse) * mse ** beta``
+    collapsed to ~0 for the common case ``mse < 1`` (``exp(-alpha*mse)``
+    tapers down AND ``mse**beta`` shrinks), so it was non-informative. The
+    fixed weighting keeps the loss on the MSE scale::
+
+        weight_i = 1 + alpha * (1 - exp(-beta * mse_i))  (bounded in [1, 1+alpha])
+        focal    = mean(weight_i * mse_i)
+
+    Easy examples keep weight ~1 (the loss stays comparable to MSE); the
+    hardest examples are weighted up to ``1 + alpha`` times more. Defaults
+    are unchanged: ``alpha`` modulates the max hard-example boost, ``beta``
+    the saturation rate of the difficulty ramp. Still experimental / unused
+    (D402).
 
     Args:
-        alpha: Modulating factor (default: 2.0)
-        beta: Exponent for weighting (default: 4.0)
+        alpha: Max extra weight on hard examples (default: 2.0)
+        beta: Saturation rate of the difficulty ramp (default: 4.0)
     """
     
     def __init__(self, alpha: float = 2.0, beta: float = 4.0):
@@ -53,11 +61,15 @@ class FocalMSELoss(nn.Module):
         # Standard MSE
         mse = (predictions - targets) ** 2
         
-        # Compute weights: easier examples get lower weight
-        weights = torch.exp(-self.alpha * mse)
+        # Compute weights: harder examples get higher weight, but the term
+        # stays bounded so the loss never collapses below the MSE scale
+        # (D369).
+        weights = 1.0 + self.alpha * (1.0 - torch.exp(-self.beta * mse))  # bounded in [1, 1 + alpha]
         
-        # Apply focal weighting
-        focal_mse = weights * (mse ** self.beta)
+        # Apply focal weighting on the MSE scale (D369): do NOT raise mse to
+        # a power -- ``mse ** beta`` with beta=4 is what collapsed the loss
+        # toward 0 for in-range errors (mse < 1).
+        focal_mse = weights * mse
         
         return focal_mse.mean()
 
@@ -127,24 +139,30 @@ class CombinedLoss(nn.Module):
     Combination of MSE, Focal, and Ranking losses
     Provides best overall performance
 
-    .. warning:: EXPERIMENTAL / UNUSED (D370). The three components live on
-       incompatible scales: ``nn.MSELoss`` is ~O(1), ``FocalMSELoss``
-       collapses toward 0 (see its warning), and ``RankingLoss`` is a hinge
-       in raw rating units. Summing them with fixed weights (1.0/0.5/0.3)
-       makes the objective dominated by the ranking hinge. Left unchanged
-       for reference; re-scale/renormalize before any real use.
+    D370 fix: the three components live on different scales, so each term is
+    normalized/weighted so no one dominates the sum. ``nn.MSELoss`` is ~O(1),
+    ``FocalMSELoss`` shares the MSE scale after the D369 fix, and the
+    ``RankingLoss`` hinge (raw rating units) is divided by ``rating_scale``
+    (the rating span, 4.5). Per-term weights are config terms with sane
+    defaults: ``mse_weight=1.0`` (the anchor), ``focal_weight=0.2``,
+    ``ranking_weight=0.1`` (previously a flat 1.0/0.5/0.3 sum).
     """
     
     def __init__(
         self,
         mse_weight: float = 1.0,
-        focal_weight: float = 0.5,
-        ranking_weight: float = 0.3
+        focal_weight: float = 0.2,
+        ranking_weight: float = 0.1,
+        rating_scale: float = 4.5,
     ):
         super().__init__()
         self.mse_weight = mse_weight
         self.focal_weight = focal_weight
         self.ranking_weight = ranking_weight
+        # D370: per-term scale normalization. The ranking hinge lives in raw
+        # rating units (margin 1.0 on a ~4.5-star span), so it is divided by
+        # ``rating_scale`` to sit on the same O(1) level as the MSE terms.
+        self.rating_scale = rating_scale
         
         self.mse_loss = nn.MSELoss()
         self.focal_loss = FocalMSELoss()
@@ -174,7 +192,12 @@ class CombinedLoss(nn.Module):
         loss_ranking = torch.tensor(0.0, device=predictions.device)
         if predictions_pairs is not None:
             pred_high, pred_low, target_high, target_low = predictions_pairs
-            loss_ranking = self.ranking_loss(pred_high, pred_low, target_high, target_low)
+            # D370: normalize off the raw rating scale so the hinge cannot
+            # dominate the sum of the O(1) MSE-scale terms.
+            loss_ranking = (
+                self.ranking_loss(pred_high, pred_low, target_high, target_low)
+                / self.rating_scale
+            )
         
         # Combine losses
         total_loss = (
