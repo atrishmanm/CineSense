@@ -8,8 +8,11 @@ Discard old unused ones (LRU eviction)
 """
 
 from collections import OrderedDict
+from datetime import datetime
 import time
 import logging
+
+from config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +25,7 @@ class SlidingWindowCache:
     This is the "conveyor belt" - movies slide through memory
     """
     
-    def __init__(self, max_size=100):
+    def __init__(self, max_size=Config.MOVIE_CACHE_SIZE):
         """
         Args:
             max_size: Maximum number of movies to keep in memory
@@ -31,6 +34,9 @@ class SlidingWindowCache:
         self.cache = OrderedDict()  # Maintains insertion order
         self.access_count = {}  # Track how many times each movie is accessed
         self.last_access = {}  # Track last access time
+        # Hit/miss counters (cumulative, consumed by the cache monitor endpoint)
+        self.hits = 0
+        self.misses = 0
         
     def get(self, movie_id):
         """
@@ -44,7 +50,9 @@ class SlidingWindowCache:
             self.cache.move_to_end(movie_id)
             self.access_count[movie_id] = self.access_count.get(movie_id, 0) + 1
             self.last_access[movie_id] = time.time()
+            self.hits += 1
             return self.cache[movie_id]
+        self.misses += 1
         return None
     
     def put(self, movie_id, movie_data):
@@ -100,7 +108,7 @@ class SlidingWindowCache:
         """Get current cache size"""
         return len(self.cache)
     
-    def is_low(self, threshold=0.3):
+    def is_low(self, threshold=Config.CACHE_REFILL_THRESHOLD):
         """
         Check if cache is running low
         
@@ -128,12 +136,16 @@ class SlidingWindowCache:
     
     def stats(self):
         """Get cache statistics"""
+        total = self.hits + self.misses
         return {
             'size': len(self.cache),
             'max_size': self.max_size,
             'utilization': len(self.cache) / self.max_size if self.max_size > 0 else 0,
             'total_access_count': sum(self.access_count.values()),
-            'avg_access_per_movie': sum(self.access_count.values()) / len(self.cache) if self.cache else 0
+            'avg_access_per_movie': sum(self.access_count.values()) / len(self.cache) if self.cache else 0,
+            'hits': self.hits,
+            'misses': self.misses,
+            'hit_rate': (self.hits / total * 100) if total > 0 else 0.0,
         }
 
 
@@ -148,24 +160,31 @@ class VectorCache:
     NOT full movie objects!
     """
     
-    def __init__(self, max_size=500):
+    def __init__(self, max_size=Config.VECTOR_CACHE_SIZE):
         """
         Args:
             max_size: Maximum number of vectors to cache
         """
         self.max_size = max_size
         self.vectors = OrderedDict()  # movie_id -> vector
+        # Hit/miss counters (cumulative, consumed by the cache monitor endpoint)
+        self.hits = 0
+        self.misses = 0
     
     def get(self, movie_id):
         """Get vector for movie"""
         if movie_id in self.vectors:
             self.vectors.move_to_end(movie_id)
+            self.hits += 1
             return self.vectors[movie_id]
+        self.misses += 1
         return None
     
     def put(self, movie_id, vector):
-        """Store vector for movie"""
+        """Store (or overwrite) vector for movie"""
         if movie_id in self.vectors:
+            # Overwrite the stale embedding and refresh LRU position
+            self.vectors[movie_id] = vector
             self.vectors.move_to_end(movie_id)
         else:
             self.vectors[movie_id] = vector
@@ -192,6 +211,18 @@ class VectorCache:
         """Get cache size"""
         return len(self.vectors)
     
+    def stats(self):
+        """Get vector cache statistics"""
+        total = self.hits + self.misses
+        return {
+            'size': len(self.vectors),
+            'max_size': self.max_size,
+            'utilization': len(self.vectors) / self.max_size if self.max_size > 0 else 0,
+            'hits': self.hits,
+            'misses': self.misses,
+            'hit_rate': (self.hits / total * 100) if total > 0 else 0.0,
+        }
+    
     def clear(self):
         """Clear all vectors"""
         self.vectors.clear()
@@ -206,7 +237,7 @@ class CacheManager:
     2. Vector cache (embeddings)
     """
     
-    def __init__(self, movie_cache_size=100, vector_cache_size=500):
+    def __init__(self, movie_cache_size=Config.MOVIE_CACHE_SIZE, vector_cache_size=Config.VECTOR_CACHE_SIZE):
         self.movie_cache = SlidingWindowCache(max_size=movie_cache_size)
         self.vector_cache = VectorCache(max_size=vector_cache_size)
         
@@ -236,19 +267,32 @@ class CacheManager:
         """Check if vector is cached"""
         return self.vector_cache.contains(movie_id)
     
-    def needs_refill(self, threshold=0.3):
+    def needs_refill(self, threshold=Config.CACHE_REFILL_THRESHOLD):
         """Check if movie cache needs refilling"""
         return self.movie_cache.is_low(threshold)
     
     def get_stats(self):
-        """Get cache statistics"""
+        """
+        Get cache statistics.
+
+        Returns the nested ``movie_cache``/``vector_cache`` blocks for internal
+        callers *and* flat top-level counters (``movie_count``, ``movie_hits``,
+        ``movie_misses``, ``vector_count``, ``vector_hits``, ``vector_misses``,
+        ``timestamp``) that the API cache-monitor endpoint expects.
+        """
+        movie_stats = self.movie_cache.stats()
+        vector_stats = self.vector_cache.stats()
         return {
-            'movie_cache': self.movie_cache.stats(),
-            'vector_cache': {
-                'size': self.vector_cache.size(),
-                'max_size': self.vector_cache.max_size,
-                'utilization': self.vector_cache.size() / self.vector_cache.max_size
-            }
+            'movie_cache': movie_stats,
+            'vector_cache': vector_stats,
+            # Flat aliases consumed by /api/cache/monitor and the JS widget
+            'movie_count': movie_stats['size'],
+            'movie_hits': movie_stats.get('hits', 0),
+            'movie_misses': movie_stats.get('misses', 0),
+            'vector_count': vector_stats['size'],
+            'vector_hits': vector_stats.get('hits', 0),
+            'vector_misses': vector_stats.get('misses', 0),
+            'timestamp': datetime.now().isoformat(),
         }
     
     def clear_all(self):
@@ -274,16 +318,16 @@ if __name__ == "__main__":
         print(f"Added movie {i}, cache size: {cache.size()}")
     
     print(f"\nFinal cache IDs: {cache.get_all_ids()}")
-    print(f"Movies 1-2 should be evicted (LRU)")
+    print("Movies 1-2 should be evicted (LRU)")
     
     # Access movie 3 (makes it most recently used)
     cache.get(3)
-    print(f"\nAccessed movie 3")
+    print("\nAccessed movie 3")
     
     # Add one more movie
     cache.put(8, {'id': 8, 'title': 'Movie 8'})
     print(f"Added movie 8, cache size: {cache.size()}")
     print(f"Final cache IDs: {cache.get_all_ids()}")
-    print(f"Movie 4 should be evicted, Movie 3 should remain")
+    print("Movie 4 should be evicted, Movie 3 should remain")
     
     print(f"\nCache stats: {cache.stats()}")

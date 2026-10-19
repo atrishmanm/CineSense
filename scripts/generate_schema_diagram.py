@@ -31,8 +31,6 @@ def draw_relational_schema():
         columns: list of (col_name, col_type, key_type)
             key_type: 'PK', 'FK', 'PK,FK', or ''
         """
-        total_height = (len(columns) + 1) * row_height
-
         # Header
         header = mpatches.FancyBboxPatch(
             (x, y - row_height), width, row_height,

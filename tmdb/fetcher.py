@@ -374,7 +374,7 @@ if __name__ == "__main__":
     data = fetcher.get_popular_movies(page=1)
     
     if data and 'results' in data:
-        print(f"✓ Connected to TMDB API successfully!")
+        print("✓ Connected to TMDB API successfully!")
         print(f"  Fetched {len(data['results'])} popular movies")
         print(f"\n  Sample movie: {data['results'][0]['title']}")
     else:

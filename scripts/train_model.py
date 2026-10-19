@@ -52,7 +52,7 @@ def main():
     logger.info("="*80)
     logger.info("NETFLIX-LEVEL RECOMMENDER TRAINING")
     logger.info("="*80)
-    logger.info(f"Configuration:")
+    logger.info("Configuration:")
     logger.info(f"  Model type: {args.model_type}")
     logger.info(f"  Epochs: {args.epochs}")
     logger.info(f"  Batch size: {args.batch_size}")
@@ -71,7 +71,7 @@ def main():
         logger.info("Running preprocessing pipeline...")
         
         sample_size = 100000 if args.sample else None
-        preprocessor = preprocess_pipeline(sample_size=sample_size)
+        preprocess_pipeline(sample_size=sample_size)
     else:
         logger.info("Using existing preprocessed data")
     
@@ -101,7 +101,8 @@ def main():
     logger.info("\n>>> STEP 3: MODEL TRAINING")
     
     if args.model_type in ('deep_ncf', 'advanced_hybrid'):
-        # Use advanced training pipeline (focal loss, warmup, mixed precision)
+        # Use advanced training pipeline (focal loss, warmup, mixed precision).
+        # training/advanced_training.py saves to model/{model_type}_recommender.pt.
         from training.advanced_training import train_advanced_model
         
         metrics = train_advanced_model(
@@ -111,9 +112,12 @@ def main():
             learning_rate=args.lr,
             weight_decay=1e-5
         )
+        saved_model_path = f"model/{args.model_type}_recommender.pt"
     else:
         from ai.training_pipeline import train_netflix_model
         
+        # ai/training_pipeline.py writes checkpoints under this directory and is
+        # consumed by ai/netflix_recommender.py + ai/inference_pipeline.py.
         config = {
             'batch_size': args.batch_size,
             'use_implicit_feedback': args.implicit,
@@ -129,6 +133,7 @@ def main():
         }
         
         pipeline, metrics = train_netflix_model(config)
+        saved_model_path = "ai/models/best_model.pt"
     
     logger.info("\n" + "="*80)
     logger.info("✓ TRAINING COMPLETE!")
@@ -137,7 +142,7 @@ def main():
     logger.info(f"  RMSE: {metrics.get('RMSE', 'N/A'):.4f}")
     logger.info(f"  Hit@10: {metrics.get('Hit@10', 'N/A'):.4f}")
     logger.info(f"  NDCG@10: {metrics.get('NDCG@10', 'N/A'):.4f}")
-    logger.info("\nModel saved to: ai/models/best_model.pt")
+    logger.info(f"\nModel saved to: {saved_model_path}")
     logger.info("\nYou can now use the model in your Flask app!")
     logger.info("="*80)
 

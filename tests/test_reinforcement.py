@@ -60,7 +60,15 @@ class TestThompsonSampling:
         for _ in range(20):
             ts.update(2, 0.0)
 
-        selected = ts.select_arm([1, 2], top_k=1)
+        # Seed the global RNG (and restore it) so the Beta draws are
+        # deterministic: this test must not flake.
+        rng_state = np.random.get_state()
+        np.random.seed(42)
+        try:
+            selected = ts.select_arm([1, 2], top_k=1)
+        finally:
+            np.random.set_state(rng_state)
+
         # Arm 1 should overwhelmingly be chosen
         assert selected == [1]
 

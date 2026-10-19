@@ -154,7 +154,7 @@ if __name__ == "__main__":
     
     if success:
         print("\n✓ Data fetching completed successfully!")
-        print("You can now run the application: python app.py")
+        print("You can now run the application: python app_integrated.py")
     else:
         print("\n✗ Data fetching failed. Please check the logs.")
         sys.exit(1)

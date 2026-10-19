@@ -298,7 +298,7 @@ class ContentPipeline:
                 
                 # Fetch and store cast/crew if needed
                 if movie.get('id'):
-                    self._store_credits(movie['id'])
+                    self._store_credits(movie['id'], movie_data['movie_id'])
                 
                 stored_movies.append(movie_data)
                 
@@ -307,14 +307,21 @@ class ContentPipeline:
         
         return stored_movies
     
-    def _store_credits(self, tmdb_id):
-        """Fetch and store movie credits (cast and crew)"""
+    def _store_credits(self, tmdb_id, movie_id=None):
+        """Fetch and store movie credits (cast and crew)
+
+        ``tmdb_id`` is used to fetch details from TMDB, while ``movie_id`` is the
+        internal movies PK used for the link rows. They are normally identical
+        (movies.movie_id == tmdb id), but keeping them separate avoids passing a
+        TMDB id where a movie_id is required.
+        """
         try:
             details = self.fetcher.get_movie_details(tmdb_id)
             if not details:
                 return
             
             credits = details.get('credits', {})
+            db_movie_id = movie_id if movie_id is not None else tmdb_id
             
             # Store directors
             crew = credits.get('crew', [])
@@ -325,7 +332,7 @@ class ContentPipeline:
                     director['name'],
                     director.get('id')
                 )
-                db.link_movie_director(tmdb_id, director_id)
+                db.link_movie_director(db_movie_id, director_id)
             
             # Store actors
             cast = credits.get('cast', [])
@@ -335,7 +342,7 @@ class ContentPipeline:
                     actor.get('id')
                 )
                 db.link_movie_actor(
-                    tmdb_id,
+                    db_movie_id,
                     actor_id,
                     actor.get('order', 0),
                     actor.get('character')

@@ -159,7 +159,7 @@ def check_status():
     """Check system status"""
     logger.info("\n>>> System Status\n")
     
-    # Check cache directory
+    # Training cache produced by ai/data_preprocessor.py (cache_dir='ai/cache')
     cache_dir = Path('ai/cache')
     
     if cache_dir.exists():
@@ -171,18 +171,28 @@ def check_status():
     else:
         logger.info("⚠ Cache directory doesn't exist")
     
-    # Check models directory
-    model_dir = Path('ai/models')
-    
-    if model_dir.exists():
-        model_file = model_dir / 'best_model.pt'
-        if model_file.exists():
-            size_mb = model_file.stat().st_size / (1024 * 1024)
-            logger.info(f"✓ Trained model found: best_model.pt ({size_mb:.1f} MB)")
-        else:
-            logger.info("⚠ No trained model found")
+    # Training checkpoints produced by ai/training_pipeline.py (model_dir='ai/models'),
+    # consumed by ai/netflix_recommender.py + ai/inference_pipeline.py.
+    train_model_file = Path('ai/models') / 'best_model.pt'
+    if train_model_file.exists():
+        size_mb = train_model_file.stat().st_size / (1024 * 1024)
+        logger.info(f"✓ Trained model found: ai/models/best_model.pt ({size_mb:.1f} MB)")
     else:
-        logger.info("⚠ Models directory doesn't exist")
+        logger.info("⚠ No trained model found in ai/models (train to create best_model.pt)")
+    
+    # Serving artifacts actually loaded by the app: ai/recommender.py reads
+    # Config.MODEL_DIR (default './model').
+    try:
+        from config import Config
+        serve_dir = Path(Config.MODEL_DIR)
+    except Exception:
+        serve_dir = Path('model')
+    serve_artifacts = ['hybrid_recommender.pt', 'ncf_recommender.pt', 'plot_embeddings.npy']
+    present = [name for name in serve_artifacts if (serve_dir / name).exists()]
+    if present:
+        logger.info(f"✓ Serving artifacts found in {serve_dir}: {', '.join(present)}")
+    else:
+        logger.info(f"⚠ No serving artifacts found in {serve_dir} (app will use fallbacks)")
     
     # Check if model loads
     try:

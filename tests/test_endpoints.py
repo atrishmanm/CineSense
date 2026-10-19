@@ -1,89 +1,129 @@
-"""Quick endpoint test for all fixed features"""
-import urllib.request
-import json
-import time
+"""Endpoint smoke tests for CineSense (live server required).
+
+These tests require a running server on BASE (default http://localhost:5000).
+When the server is unreachable they are skipped (not failed) so `pytest -q`
+stays green offline. Can still be run directly as a script:
+`python tests/test_endpoints.py` (exits non-zero on failure).
+"""
+
+import sys
+
+import pytest
+import requests
 
 BASE = "http://localhost:5000"
+PROBE_TIMEOUT = 2.0
 
-def check_endpoint(name, url, method="GET", data=None, expect_html=False):
-    print(f"\n{'='*50}")
-    print(f"Testing: {name}")
-    print(f"URL: {url}")
+
+def _server_up(timeout=PROBE_TIMEOUT) -> bool:
+    """Probe the server with a short timeout (never at import time)."""
     try:
-        if data:
-            req = urllib.request.Request(
-                url, 
-                data=json.dumps(data).encode(),
-                headers={"Content-Type": "application/json"}
-            )
-        else:
-            req = urllib.request.Request(url)
-        
-        resp = urllib.request.urlopen(req, timeout=120)
-        
-        if expect_html:
-            html = resp.read().decode()
-            print(f"Status: {resp.status}")
-            print(f"  HTML length: {len(html)} chars")
-            # Check for key content
-            checks = {
-                "CineSense": "CineSense" in html,
-                "Chat AI nav": "Chat AI" in html or "chat-ui" in html,
-                "Friends nav": "Friends" in html or "friends" in html,
-            }
-            for check, passed in checks.items():
-                print(f"  {check}: {'YES' if passed else 'NO'}")
-            print("PASS")
-        else:
-            body = json.loads(resp.read())
-            print(f"Status: {resp.status}")
-            
-            # Print summary
-            if isinstance(body, dict):
-                for k, v in body.items():
-                    if isinstance(v, list):
-                        print(f"  {k}: [{len(v)} items]")
-                        if v and isinstance(v[0], dict):
-                            print(f"    First: {v[0].get('title', v[0])}")
-                    elif isinstance(v, str) and len(v) > 100:
-                        print(f"  {k}: {v[:100]}...")
-                    else:
-                        print(f"  {k}: {v}")
-            print("PASS")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        print(f"HTTP Error: {e.code}")
-        print(f"  Body: {body[:300]}")
-        print("FAIL")
-    except Exception as e:
-        print(f"Error: {e}")
-        print("FAIL")
+        return requests.get(BASE, timeout=timeout).status_code == 200
+    except Exception:
+        return False
 
-def main():
-    # Test 1: Home page loads
-    check_endpoint("Home Page", f"{BASE}/", expect_html=True)
 
-    # Test 2: Trending
-    check_endpoint("Trending API", f"{BASE}/api/trending")
+@pytest.fixture(autouse=True)
+def _require_live_server():
+    """Skip every test in this module when the live server is unreachable."""
+    if not _server_up():
+        pytest.skip("live server at localhost:5000 not running")
 
-    # Test 3: Chat
-    check_endpoint("Chat API", f"{BASE}/api/chat", data={"message": "recommend me a good sci-fi movie"})
 
-    # Test 4: Mood Recommendations
-    check_endpoint("Mood API", f"{BASE}/api/mood-recommendations", data={"mood": "happy", "user_id": 1})
+def test_home_page():
+    """Test 1: Home page loads"""
+    response = requests.get(f"{BASE}/", timeout=30)
+    assert response.status_code == 200
+    assert "CineSense" in response.text
 
-    # Test 5: Chat UI page
-    check_endpoint("Chat UI Page", f"{BASE}/chat-ui", expect_html=True)
 
-    # Test 6: Friends page (will redirect to login)
-    check_endpoint("Friends/Login Page", f"{BASE}/friends", expect_html=True)
+def test_trending_api():
+    """Test 2: Trending API returns JSON"""
+    response = requests.get(f"{BASE}/api/trending", timeout=60)
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "trending" in data or "movies" in data
 
-    # Test 7: Features page
-    check_endpoint("Features Page", f"{BASE}/features", expect_html=True)
+
+def test_chat_api():
+    """Test 3: Chat API responds to a message"""
+    response = requests.post(
+        f"{BASE}/api/chat",
+        json={"message": "recommend me a good sci-fi movie"},
+        timeout=120,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "response" in data or "message" in data
+
+
+def test_mood_api():
+    """Test 4: Mood recommendations API responds"""
+    response = requests.post(
+        f"{BASE}/api/mood-recommendations",
+        json={"mood": "happy", "user_id": 1},
+        timeout=60,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "recommendations" in data or "movies" in data
+
+
+def test_chat_ui_page():
+    """Test 5: Chat UI page loads"""
+    response = requests.get(f"{BASE}/chat-ui", timeout=30)
+    assert response.status_code == 200
+    assert "chat" in response.text.lower() or "CineSense" in response.text
+
+
+def test_friends_page():
+    """Test 6: Friends page loads (may redirect to login)"""
+    response = requests.get(f"{BASE}/friends", timeout=30, allow_redirects=True)
+    assert response.status_code in (200, 302, 401)
+
+
+def test_features_page():
+    """Test 7: Features page loads"""
+    response = requests.get(f"{BASE}/features", timeout=30)
+    assert response.status_code == 200
+    assert response.text
+
+
+def main() -> int:
+    """CLI harness: run every endpoint check and report failures."""
+    if not _server_up():
+        print(f"Server not running at {BASE}. Start with: python app_integrated.py")
+        return 1
+
+    checks = [
+        test_home_page,
+        test_trending_api,
+        test_chat_api,
+        test_mood_api,
+        test_chat_ui_page,
+        test_friends_page,
+        test_features_page,
+    ]
+
+    failures = 0
+    for check in checks:
+        try:
+            check()
+            print(f"PASS {check.__name__}")
+        except Exception as e:  # noqa: BLE001 - CLI harness reports all failures
+            failures += 1
+            print(f"FAIL {check.__name__}: {e}")
 
     print(f"\n{'='*50}")
+    if failures:
+        print(f"{failures}/{len(checks)} checks FAILED")
+        return 1
     print("All tests complete!")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -2,7 +2,6 @@
 Unit tests for CineSense Comprehensive Metrics Suite
 """
 
-import math
 import numpy as np
 import pytest
 
@@ -17,9 +16,7 @@ from benchmarks.comprehensive_metrics import (
     mrr_at_k,
     catalog_coverage,
     gini_coefficient,
-    mean_novelty,
     intra_list_diversity,
-    evaluate_full_suite,
 )
 
 

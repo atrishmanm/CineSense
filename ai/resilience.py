@@ -25,7 +25,6 @@ class CircuitState(Enum):
 
 class CircuitBreakerOpenException(Exception):
     """Raised when an operation is attempted while the circuit breaker is OPEN."""
-    pass
 
 
 class CircuitBreaker:

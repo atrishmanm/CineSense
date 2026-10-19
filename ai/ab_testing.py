@@ -5,14 +5,11 @@ Conduct experiments, track metrics, and analyze performance
 
 import hashlib
 import random
-import time
-import json
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 import logging
 from scipy import stats
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +315,8 @@ class ABTestingFramework:
                         chi2, p_value = stats.chi2_contingency(contingency)[:2]
                         tests['ctr_p_value'] = round(p_value, 4)
                         tests['ctr_significant'] = p_value < 0.05
-                    except:
+                    except Exception as e:
+                        logger.warning(f"chi-square CTR test failed: {e}")
                         tests['ctr_p_value'] = None
                 
                 # Test average rating (t-test)

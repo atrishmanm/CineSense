@@ -124,7 +124,7 @@ def main():
     
     try:
         # Step 1-2: Merge data
-        merged_df = run_step_1_merge()
+        run_step_1_merge()
         
         # Step 3: Feature engineering
         run_step_3_features()
@@ -138,11 +138,11 @@ def main():
         logger.info("="*100)
         
         logger.info("\n📊 FINAL RESULTS:")
-        logger.info(f"\nNCF Model (Pure CF):")
+        logger.info("\nNCF Model (Pure CF):")
         logger.info(f"  Best Val RMSE: {min(ncf_history['val_rmse']):.4f}")
         logger.info(f"  Best Val MAE:  {min(ncf_history['val_mae']):.4f}")
         
-        logger.info(f"\nHybrid Model (CF + Content):")
+        logger.info("\nHybrid Model (CF + Content):")
         logger.info(f"  Best Val RMSE: {min(hybrid_history['val_rmse']):.4f}")
         logger.info(f"  Best Val MAE:  {min(hybrid_history['val_mae']):.4f}")
         

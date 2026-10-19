@@ -11,7 +11,9 @@ Unit tests for CineSense production-scale architectural subsystems:
 - Latency Histogram & Funnel Tracker Telemetry
 """
 
-import math
+import threading
+import time
+
 import numpy as np
 import pytest
 
@@ -19,10 +21,10 @@ from ai.vector_search import HNSWIndex, ProductQuantizer, ReciprocalRankFusion
 from ai.xfetch_cache import XFetchCache, Singleflight
 from ai.multi_stage_ranker import MultiStageRanker, PlattCalibrator
 from ai.feature_store import OnlineFeatureStore
-from ai.resilience import CircuitBreaker, CircuitBreakerOpenException, DeadlineContext, TokenBucketRateLimiter, IdempotencyRegistry
+from ai.resilience import CircuitBreaker, TokenBucketRateLimiter, IdempotencyRegistry
 from ai.ab_experimentation import ExperimentationEngine
 from ai.drift_monitor import DriftMonitor
-from ai.diversity_engine import DPPDiversifier, CalibratedReranker
+from ai.diversity_engine import DPPDiversifier
 from ai.telemetry import LatencyHistogram, FunnelTracker
 
 
@@ -71,23 +73,47 @@ class TestXFetchAndSingleflight:
     def test_singleflight_coalescing(self):
         sf = Singleflight()
         calls = 0
+        counter_lock = threading.Lock()
+        start_barrier = threading.Barrier(5)
 
         def worker():
             nonlocal calls
-            calls += 1
+            with counter_lock:
+                calls += 1
+            # Keep the first in-flight call alive so followers can coalesce.
+            time.sleep(0.3)
             return 42
 
-        # 3 sequential calls for same key
-        res1 = sf.do("key1", worker)
-        res2 = sf.do("key1", worker)
-        assert res1 == 42
-        assert res2 == 42
+        results = []
+        results_lock = threading.Lock()
+
+        def caller():
+            start_barrier.wait()
+            value = sf.do("key1", worker)
+            with results_lock:
+                results.append(value)
+
+        threads = [threading.Thread(target=caller) for _ in range(5)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert results == [42] * 5
+        # All 5 concurrent callers must share a single execution.
+        assert calls == 1
 
     def test_xfetch_cache_hit_and_expiration(self):
         cache = XFetchCache(max_size=10, default_ttl_sec=1.0)
         cache.set("k1", "v1", ttl_sec=10.0)
         assert cache.get("k1") == "v1"
         assert cache.get_hit_ratio() > 0.0
+
+        # A short-TTL entry must become a hard miss once it expires.
+        cache.set("k2", "v2", ttl_sec=0.2)
+        assert cache.get("k2") == "v2"
+        time.sleep(0.3)
+        assert cache.get("k2") is None
 
 
 class TestMultiStageRanker:
@@ -211,15 +237,19 @@ class TestABTestingAndSRM:
 
 class TestMLOpsDriftMonitoring:
     def test_psi_calculation_stable(self):
-        dist_base = np.random.normal(loc=0.0, scale=1.0, size=1000)
-        dist_curr = np.random.normal(loc=0.02, scale=1.01, size=1000)
+        # Seeded generator: PSI tests must not flake.
+        rng = np.random.default_rng(1234)
+        dist_base = rng.normal(loc=0.0, scale=1.0, size=1000)
+        dist_curr = rng.normal(loc=0.02, scale=1.01, size=1000)
         res = DriftMonitor.calculate_psi(dist_base, dist_curr)
         assert res["status"] in ["STABLE", "MODERATE_DRIFT"]
         assert res["psi"] < 0.25
 
     def test_psi_calculation_drift_alert(self):
-        dist_base = np.random.normal(loc=0.0, scale=1.0, size=1000)
-        dist_shifted = np.random.normal(loc=2.5, scale=1.0, size=1000)
+        # Seeded generator: PSI tests must not flake.
+        rng = np.random.default_rng(1234)
+        dist_base = rng.normal(loc=0.0, scale=1.0, size=1000)
+        dist_shifted = rng.normal(loc=2.5, scale=1.0, size=1000)
         res = DriftMonitor.calculate_psi(dist_base, dist_shifted)
         assert res["status"] == "SIGNIFICANT_DRIFT"
         assert res["psi"] > 0.25

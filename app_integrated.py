@@ -24,6 +24,27 @@ logging.getLogger('huggingface_hub').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 CHAT_RECOMMENDATION_LIMIT = 20
+MAX_RESULT_LIMIT = 100          # hard cap for client-supplied top_k/limit
+STARTUP_INDEX_LIMIT = 10000     # movies indexed into semantic search at startup
+
+
+def _json_body():
+    """Parse a JSON request body, returning {} when the body is absent or invalid."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _clamp_int(value, default, minimum=1, maximum=MAX_RESULT_LIMIT):
+    """Safely coerce a client-supplied numeric value into [minimum, maximum]."""
+    if value is None or value == '':
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed < minimum:
+        return minimum
+    return min(parsed, maximum)
 
 
 def _fallback_chat(message, db_manager):
@@ -289,8 +310,8 @@ def create_app():
                 LEFT JOIN movie_keywords mk ON m.movie_id = mk.movie_id
                 WHERE m.overview IS NOT NULL AND m.overview != ''
                 GROUP BY m.movie_id
-                LIMIT 10000
-            """, fetch_all=True)
+                LIMIT {STARTUP_INDEX_LIMIT}
+            """.format(STARTUP_INDEX_LIMIT=STARTUP_INDEX_LIMIT), fetch_all=True)
             for movie in movies:
                 movie['genres'] = movie['genres'].split(',') if movie['genres'] else []
                 movie['cast'] = (movie.get('cast_members', '').split(',') if movie.get('cast_members') else [])[:5]
@@ -333,8 +354,9 @@ def create_app():
         """Conversational movie recommendations powered by semantic search"""
         load_ai_models('chatbot')
 
-        data = request.json or {}
-        user_id = data.get('user_id', session.get('user_id'))
+        data = _json_body()
+        # Never trust a client-supplied user_id; bind personalization to the session.
+        user_id = session.get('user_id')
         message = (data.get('message') or '').strip()
 
         if not message:
@@ -437,10 +459,11 @@ def create_app():
         """Get recommendations based on mood"""
         load_ai_models('mood_recommender')
         
-        data = request.json or {}
-        user_id = data.get('user_id', session.get('user_id'))
+        data = _json_body()
+        # Never trust a client-supplied user_id; bind personalization to the session.
+        user_id = session.get('user_id')
         mood_input = data.get('mood')
-        top_k = data.get('limit', data.get('top_k', 24))
+        top_k = _clamp_int(data.get('limit', data.get('top_k', 24)), 24)
         
         if not mood_input:
             return jsonify({'error': 'Mood input required'}), 400
@@ -466,7 +489,7 @@ def create_app():
         """Get trending movies"""
         load_ai_models('trending')
         
-        limit = request.args.get('limit', 20, type=int)
+        limit = _clamp_int(request.args.get('limit'), 20)
         
         try:
             # Try AI trending detector first
@@ -485,12 +508,13 @@ def create_app():
             return jsonify({'trending': movies})
         except Exception as e:
             logger.error(f"Trending error: {e}")
-            # Final fallback
+            # Final fallback: if even the DB is unavailable, report a real error
             try:
                 movies = db_manager.get_top_movies(limit=limit, order_by='popularity')
                 return jsonify({'trending': movies})
-            except Exception:
-                return jsonify({'trending': []})
+            except Exception as exc:
+                logger.error(f"Trending fallback error: {exc}")
+                return jsonify({'error': 'Trending is temporarily unavailable', 'trending': []}), 503
     
     @app.route('/api/viral')
     def get_viral():
@@ -511,16 +535,16 @@ def create_app():
             return jsonify({'viral': movies})
         except Exception as e:
             logger.error(f"Viral detection error: {e}")
-            return jsonify({'viral': []})
+            return jsonify({'error': 'Viral detection is temporarily unavailable', 'viral': []}), 503
     
     @app.route('/api/visual-search', methods=['POST'])
     def visual_search():
         """Search movies by uploaded image (base64) using CLIP"""
         load_ai_models('visual_search')
 
-        data = request.json or {}
+        data = _json_body()
         image_input = data.get('image')
-        top_k = data.get('top_k', 10)
+        top_k = _clamp_int(data.get('top_k', 10), 10)
 
         if not image_input:
             return jsonify({'error': 'Image input required (base64)'}), 400
@@ -531,10 +555,11 @@ def create_app():
         try:
             visual = app.ai_systems['visual_search']
             if getattr(visual, 'movie_poster_embeddings', None) is None:
+                # Internal state where the poster index is not ready: surface it
                 return jsonify({
-                    'results': [],
-                    'message': 'Poster image search is warming up. Use a visual description search for now.'
-                }), 200
+                    'error': 'Poster image search is not ready yet',
+                    'results': []
+                }), 503
 
             results = visual.search_by_image(image_input=image_input, top_k=top_k, is_base64=True)
             if not results:
@@ -545,28 +570,32 @@ def create_app():
             return jsonify({'results': results})
         except Exception as e:
             logger.error(f"Visual search error: {e}")
-            return jsonify({'error': str(e), 'results': []}), 500
+            return jsonify({'error': 'Visual search failed', 'results': []}), 500
 
     @app.route('/api/text-to-image-search', methods=['POST'])
     def text_to_image_search():
         """Search movies by poster description. Uses CLIP if available, else semantic search."""
         load_ai_models('visual_search')
 
-        data = request.json or {}
-        description = data.get('description', '')
-        top_k = data.get('top_k', 20)
+        data = _json_body()
+        description = (data.get('description') or '').strip()
+        top_k = _clamp_int(data.get('top_k', 20), 20)
 
         if not description:
             return jsonify({'error': 'Description required'}), 400
 
         results = []
+        engine_available = False
+        succeeded = False
 
         # Try CLIP only if the poster index is already warm; otherwise use semantic fallback immediately.
         if 'visual_search' in app.ai_systems:
+            engine_available = True
             try:
                 visual = app.ai_systems['visual_search']
                 if getattr(visual, 'movie_poster_embeddings', None) is not None:
                     results = visual.text_to_image_search(text_description=description, top_k=top_k)
+                    succeeded = True
                 else:
                     logger.info("Visual poster index not ready; using semantic fallback for description search")
             except Exception as e:
@@ -574,14 +603,19 @@ def create_app():
 
         # Fallback: semantic search on the text description
         if not results and app.semantic_search:
+            engine_available = True
             try:
                 results = app.semantic_search.hybrid_search(description, top_k=top_k)
                 for r in results:
                     r['search_score'] = round(
                         r.get('final_score', r.get('relevance_score', 0)) * 100, 1
                     )
+                succeeded = True
             except Exception as e:
                 logger.warning(f"Semantic fallback for visual search failed: {e}")
+
+        if not engine_available or (not succeeded and not results):
+            return jsonify({'error': 'Description search is temporarily unavailable', 'results': []}), 503
 
         return jsonify({'results': results})
     

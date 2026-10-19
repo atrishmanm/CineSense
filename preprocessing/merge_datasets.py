@@ -4,7 +4,6 @@ Critical step: Map MovieLens movieId → TMDB metadata
 """
 
 import pandas as pd
-import numpy as np
 from pathlib import Path
 import logging
 

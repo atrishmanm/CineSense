@@ -20,15 +20,13 @@ computed on the held-out split by this script.
 
 from __future__ import annotations
 
-import csv
 import json
 import math
-import os
 import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -61,7 +59,11 @@ from benchmarks.comprehensive_metrics import (
 )
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Diversity weight for the greedy DPP/MMR selection in the production ranker.
+# Documented default (hand-set, not tuned on the evaluation split);
+# kept as a named constant so it is easy to sweep.
+MMR_DIVERSITY_GAIN = 0.25
 
 
 # ============================================================================
@@ -134,8 +136,11 @@ class BiasedMatrixFactorization:
         default_q = np.zeros(self.n_factors, dtype=np.float32)
 
         for epoch in range(self.n_epochs):
-            rng.shuffle(ratings_arr)
-            for row in ratings_arr:
+            # Per-epoch seeded permutation: iterate a shuffled index order
+            # without mutating the shared ratings array in place.
+            order = rng.permutation(len(ratings_arr))
+            for k in order:
+                row = ratings_arr[k]
                 u, i, r = int(row[0]), int(row[1]), row[2]
                 pu = self.p_u.get(u, default_p)
                 qi = self.q_i.get(i, default_q)
@@ -280,7 +285,7 @@ class CineSenseMultiStageProductionRanker:
                                 sim = float(np.dot(m_vec, s_vec) / (m_norm * s_norm))
                                 if sim > max_sim:
                                     max_sim = sim
-                gain = math.log(max(q_i, 1e-4)) - 0.25 * max_sim
+                gain = math.log(max(q_i, 1e-4)) - MMR_DIVERSITY_GAIN * max_sim
                 if gain > best_gain:
                     best_gain = gain
                     best_item = iid
@@ -382,13 +387,13 @@ class CineSenseUltraDeepV4:
 
 def run_32m_benchmarks():
     print("=" * 80)
-    print(" CINESENSE MOVIELENS-32M COMPREHENSIVE BENCHMARK (500+ IMPROVEMENTS)")
+    print(" CINESENSE MOVIELENS-32M COMPREHENSIVE BENCHMARK")
     print("=" * 80)
 
     total_start_time = time.time()
 
     # Step 1: Load MovieLens-32M
-    print("\n[1/5] Ingesting MovieLens-32M Catalog (87,585 Movies)...")
+    print("\n[1/5] Ingesting MovieLens-32M Catalog ...")
     movies = load_movielens_32m_movies()
     print(f"  Loaded {len(movies):,} real movies from data/movie-lens_ml-32m/movies.csv.")
 
@@ -410,9 +415,9 @@ def run_32m_benchmarks():
     print(f"  Test interactions:  {len(test_ratings):,}")
     print(f"  Total eligible users: {len(all_eval_users):,}")
 
-    # Ensure 500+ Evaluation Users!
+    # Ensure 500+ Evaluation Users (capped at the available eval-user count)!
     eval_user_subset = all_eval_users[:min(520, len(all_eval_users))]
-    print(f"  Target Evaluation Users for 500+ improvements: {len(eval_user_subset)} users.")
+    print(f"  Target Evaluation Users: {len(eval_user_subset)} users.")
 
     # Ground truth structures
     test_relevant_items = defaultdict(set)
@@ -476,6 +481,7 @@ def run_32m_benchmarks():
             "ratings_ingested": len(ratings),
             "evaluation_users_count": len(eval_user_subset),
             "candidate_retrieval_pool_k": 500,
+            "candidate_pool_source": "first 3000 catalog ids (head slice, not full catalog)",
             "bootstrap_iterations": 500,
             "relevance_threshold": 4.0,
             "rmse_target_threshold": 0.30,
@@ -505,7 +511,7 @@ def run_32m_benchmarks():
         # 3. Decision Support & Classification Metrics
         cls_metrics = calculate_classification_metrics(y_true_raw, preds_raw, relevance_threshold=4.0)
 
-        # 4. Top-10 Ranking on 500+ Users with 500 Candidate Pool
+        # 4. Top-10 Ranking on Held-Out Users with 500 Candidate Pool
         p10_list, r10_list, ndcg10_list, map10_list, hr10_list, mrr10_list = [], [], [], [], [], []
         all_recs: Dict[int, List[int]] = {}
 
@@ -514,11 +520,14 @@ def run_32m_benchmarks():
             if not rel:
                 continue
             seen = user_train_items.get(uid, set())
-            # Candidate Pool: 500 items unseen by user
+            # Candidate pool: 500 unseen items drawn from the first 3000
+            # catalog ids.  This is a head-of-catalog candidate pool, NOT a
+            # full-catalog ranking; it keeps the CPU surrogate benchmark
+            # tractable.  See benchmark_metadata.candidate_pool_source.
             unseen = [i for i in catalog_list[:3000] if i not in seen]
             if len(unseen) < 10:
                 continue
-            candidates = unseen[:500]  # 500 candidates!
+            candidates = unseen[:500]  # 500 candidates
 
             top10 = model.rank_items(uid, candidates, k=10)
             all_recs[uid] = top10
@@ -605,6 +614,7 @@ def run_32m_benchmarks():
         print(f"    Throughput (QPS): {qps:.1f}")
 
     # Step 5: Save Results JSON & Generate Markdown Report
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     json_path = RESULTS_DIR / "ml32m_benchmark_results.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
@@ -613,7 +623,7 @@ def run_32m_benchmarks():
     _generate_markdown_report(results, report_path)
 
     total_time = time.time() - total_start_time
-    print(f"\n" + "=" * 80)
+    print("\n" + "=" * 80)
     print(f" BENCHMARK RUN COMPLETE IN {total_time:.1f}s")
     print(f"  Results saved to: {json_path}")
     print(f"  Markdown report:  {report_path}")
@@ -630,7 +640,8 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         "",
         f"**Corpus:** MovieLens-32M ({meta['movies_count']:,} Movies, {meta['ratings_ingested']:,} Ratings Sample)",  # noqa: E501
         f"**Evaluated Users:** {meta['evaluation_users_count']} users",
-        f"**Candidate Retrieval Pool:** {meta['candidate_retrieval_pool_k']} candidates per request",
+        f"**Candidate Retrieval Pool:** {meta['candidate_retrieval_pool_k']} candidates per request "
+        f"({meta.get('candidate_pool_source', 'source n/a')})",
         f"**Relevance Threshold:** Rating >= {meta['relevance_threshold']} Stars",
         "",
         "---",
@@ -702,10 +713,11 @@ def _generate_markdown_report(results: Dict[str, Any], report_path: Path):
         "## 5. Configuration Notes",
         "",
         "1. **Pairwise Preference Learning Scale:** Default `LEARNING_TARGET_COMPARISONS` is 500 comparisons for stable Bradley-Terry/ELO convergence (config value, not a measured result).",
-        "2. **Candidate Retrieval Stage Scale:** Candidate pool $K_{\\text{cand}}$ is 500 candidates per inference query in this run.",
+        "2. **Candidate Retrieval Stage Scale:** Candidate pool $K_{\\text{cand}}$ is 500 candidates per inference query, drawn from the first 3000 catalog ids (a head-of-catalog slice, not a full-catalog ranking).",
         f"3. **Sample Depth:** Evaluated on {meta['evaluation_users_count']} held-out users.",
         f"4. **Normalized RMSE < 0.30 target:** Per-model status is in Table 1 above; CineSense Deep V3 surrogate norm RMSE in this run: {v3_rmse:.4f}. Raw RMSE is the meaningful scale — normalized values are for comparability only.",
         "5. **Dual T4x2 GPU Cloud Training:** Full PyTorch AMP FP16 DataParallel training on Kaggle Cloud GPU (offline artifact; see models/).",
+        f"6. **MMR diversity gain:** Hardcoded default constant `MMR_DIVERSITY_GAIN = {MMR_DIVERSITY_GAIN}` (hand-set, not tuned on the evaluation split).",
         "",
     ])
 

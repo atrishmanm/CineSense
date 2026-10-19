@@ -3,7 +3,6 @@ MovieLens-100K Data Loader
 Downloads, parses, and creates reproducible per-user temporal train/val/test splits.
 """
 
-import os
 import ssl
 import zipfile
 import urllib.request
@@ -139,7 +138,7 @@ def load_movielens_32m_movies(data_dir: Path | str | None = None) -> Dict[int, M
     import csv
     with open(movies_file, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader)  # movieId,title,genres
+        next(reader)  # consume header: movieId,title,genres
         for row in reader:
             if len(row) < 3:
                 continue
@@ -160,7 +159,14 @@ def load_movielens_32m_ratings(
     sample_size: int | None = None,
     seed: int = 42,
 ) -> List[Rating]:
-    """Load MovieLens-32M ratings, optionally sampling for fast benchmarking."""
+    """Load MovieLens-32M ratings, optionally taking a uniform random sample.
+
+    When *sample_size* is given, a seeded reservoir sample of exactly
+    ``min(sample_size, n_rows)`` ratings is returned.  This is a genuine
+    uniform sample over the whole file (not the first N rows), so the
+    benchmark is not biased toward the users/movies that happen to appear
+    first in ``ratings.csv``.
+    """
     if data_dir is None:
         data_dir = Path(__file__).resolve().parent.parent / "data" / "movie-lens_ml-32m"
     data_dir = Path(data_dir)
@@ -171,31 +177,47 @@ def load_movielens_32m_ratings(
 
     ratings: List[Rating] = []
     import csv
+
+    if sample_size is None:
+        with open(ratings_file, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            next(reader)  # userId,movieId,rating,timestamp
+            for row in reader:
+                if len(row) < 4:
+                    continue
+                ratings.append(
+                    Rating(
+                        user_id=int(row[0]),
+                        item_id=int(row[1]),
+                        rating=float(row[2]),
+                        timestamp=int(row[3]),
+                    )
+                )
+        return ratings
+
+    # Seeded reservoir sampling: O(sample_size) memory, uniform over the file.
+    rng = np.random.RandomState(seed)
+    reservoir: List[Rating] = []
     with open(ratings_file, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader)  # userId,movieId,rating,timestamp
-        count = 0
-        for row in reader:
+        next(reader)  # userId,movieId,rating,timestamp
+        for i, row in enumerate(reader):
             if len(row) < 4:
                 continue
-            ratings.append(
-                Rating(
-                    user_id=int(row[0]),
-                    item_id=int(row[1]),
-                    rating=float(row[2]),
-                    timestamp=int(row[3]),
-                )
+            rec = Rating(
+                user_id=int(row[0]),
+                item_id=int(row[1]),
+                rating=float(row[2]),
+                timestamp=int(row[3]),
             )
-            count += 1
-            if sample_size is not None and count >= sample_size:
-                break
+            if len(reservoir) < sample_size:
+                reservoir.append(rec)
+            else:
+                j = int(rng.randint(0, i + 1))
+                if j < sample_size:
+                    reservoir[j] = rec
 
-    if sample_size is not None and len(ratings) > sample_size:
-        rng = np.random.RandomState(seed)
-        indices = rng.choice(len(ratings), size=sample_size, replace=False)
-        ratings = [ratings[i] for i in indices]
-
-    return ratings
+    return reservoir
 
 
 # ---------------------------------------------------------------------------
@@ -221,8 +243,6 @@ def create_splits(
     :class:`Rating`), ``eval_users`` (set of user ids that appear in both
     train and test), and ``catalog`` (set of all item ids).
     """
-    rng = np.random.RandomState(seed)
-
     # group by user and sort chronologically
     user_ratings: Dict[int, List[Rating]] = defaultdict(list)
     for r in ratings:

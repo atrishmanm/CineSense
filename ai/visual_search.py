@@ -9,7 +9,7 @@ import requests
 from io import BytesIO
 import torch
 import numpy as np
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Optional
 import logging
 import base64
 import os
@@ -419,19 +419,56 @@ class VisualMovieSearch:
         top_k: int = 10
     ) -> List[Dict]:
         """
-        Find movies with similar color palettes
-        
+        Find movies whose poster palette is closest to the target colors.
+
+        Minimal implementation: extracts dominant poster colors for the indexed
+        movies and ranks them by RGB distance to ``target_colors``.
+
         Args:
             target_colors: List of hex colors (e.g., ['#FF0000', '#0000FF'])
             top_k: Number of results
-            
+
         Returns:
-            List of movies with similar colors
+            List of movies with similar colors (each carrying 'color_similarity')
         """
-        # This would require pre-computing color palettes for all movies
-        # For now, return placeholder
-        logger.warning("Color palette search not yet fully implemented")
-        return []
+        def _hex_to_rgb(value):
+            value = (value or '').lstrip('#')
+            if len(value) != 6:
+                return None
+            try:
+                return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+            except ValueError:
+                return None
+
+        targets = [rgb for rgb in (_hex_to_rgb(c) for c in (target_colors or [])) if rgb]
+        if not targets:
+            logger.warning("No valid target colors supplied for palette search")
+            return []
+
+        if self.movie_metadata is None and not self._ensure_index_ready():
+            logger.warning("Poster index not available; returning empty color results")
+            return []
+
+        max_rgb_distance = (3 ** 0.5) * 255.0
+        scored = []
+        for movie in self.movie_metadata[:50]:
+            poster_url = movie.get('poster_path')
+            if not poster_url:
+                continue
+            palette = self.extract_dominant_colors(poster_url, n_colors=5)
+            palette_rgb = [rgb for rgb in (_hex_to_rgb(c) for c in palette) if rgb]
+            if not palette_rgb:
+                continue
+            best = min(
+                sum((a - b) ** 2 for a, b in zip(target, candidate)) ** 0.5
+                for target in targets for candidate in palette_rgb
+            )
+            item = movie.copy()
+            item['color_similarity'] = round(1.0 - (best / max_rgb_distance), 4)
+            scored.append((best, item))
+
+        scored.sort(key=lambda x: x[0])
+        return [item for _, item in scored[:top_k]]
 
 
 # Example usage

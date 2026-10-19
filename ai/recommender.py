@@ -24,6 +24,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _normalize_elo(raw_elo):
+    """Normalize a raw ELO score into a consistent [0, 1] range.
+
+    Both the production (``get_recommendations``) and advanced
+    (``get_advanced_recommendations``) paths use this so the ``recommendation_score``
+    key has one documented scale. Clamped to 0..1 so extreme ELO values cannot
+    swamp the other weighted components.
+    """
+    try:
+        return max(0.0, min(1.0, (float(raw_elo) - 1000.0) / 1000.0))
+    except (TypeError, ValueError):
+        return 0.5
+
+
 class CineSenseRecommender:
     """
     Main recommendation engine
@@ -107,6 +121,10 @@ class CineSenseRecommender:
                 self.dl_scorer = None
         
         # User-specific models
+        # NOTE: UserPreferenceModel is RAM-only (never persisted), so its
+        # comparison_count resets on every process restart. The authoritative
+        # cold-start threshold is the DB interaction count
+        # (Config.MIN_INTERACTIONS_FOR_PERSONALIZATION), used below.
         self.user_models = {}  # user_id -> UserPreferenceModel
         self.user_embeddings = {}  # user_id -> UserEmbedding
         
@@ -346,12 +364,20 @@ class CineSenseRecommender:
             selected_ids = self.bandit.select_arm(candidate_ids, top_k=2)
             
             if len(selected_ids) < 2:
-                # Fallback to random
-                selected_ids = np.random.choice(candidate_ids, size=2, replace=False)
+                # Fallback to random (guard against an empty/short candidate pool
+                # so np.random.choice([]) cannot raise)
+                if len(candidate_ids) < 2:
+                    logger.error("Not enough distinct candidates for comparison")
+                    return None, None
+                selected_ids = list(np.random.choice(candidate_ids, size=2, replace=False))
             
             # Fetch full movie details
             movie1 = db.get_movie_by_id(selected_ids[0])
             movie2 = db.get_movie_by_id(selected_ids[1])
+            
+            if not movie1 or not movie2:
+                logger.error("Could not load full details for comparison pair")
+                return None, None
             
             return movie1, movie2
             
@@ -359,7 +385,7 @@ class CineSenseRecommender:
             logger.error(f"Error getting comparison pair: {e}")
             return None, None
     
-    def get_recommendations(self, user_id, n=20, min_interactions=5):
+    def get_recommendations(self, user_id, n=20, min_interactions=Config.MIN_INTERACTIONS_FOR_PERSONALIZATION):
         """
         Get personalized recommendations for a user
         
@@ -431,9 +457,9 @@ class CineSenseRecommender:
                 raw_pref = user_model.get_preference_score(movie_id)
                 norm_preference_score = float(1.0 / (1.0 + np.exp(-5.0 * raw_pref)))
 
-                # 3. Global quality: ELO normalized to [0, 1]
+                # 3. Global quality: ELO normalized to [0, 1] (shared helper)
                 raw_elo = float(movie.get('elo_score', Config.INITIAL_ELO_SCORE))
-                norm_elo_score = max(0.0, min(1.0, (raw_elo - 1000.0) / 1000.0))
+                norm_elo_score = _normalize_elo(raw_elo)
 
                 # 4. Optional DL genre affinity: [0, 1]
                 norm_dl_score = 0.0
@@ -595,7 +621,7 @@ class CineSenseRecommender:
             interactions = db.get_user_interactions(user_id, limit=10)
             
             if not interactions:
-                return f"Recommended based on high ratings and popularity."
+                return "Recommended based on high ratings and popularity."
             
             # Find similar movies user liked
             liked_movies = []
@@ -642,6 +668,7 @@ class CineSenseRecommender:
             # Get user interaction history with temporal weights
             interactions = db.get_user_interactions(user_id, limit=100)
             
+            # Same cold-start threshold as the production path (DB interaction count).
             if not interactions or len(interactions) < Config.MIN_INTERACTIONS_FOR_PERSONALIZATION:
                 logger.info(f"User {user_id} needs more interactions for advanced recommendations")
                 return self.get_recommendations(user_id, n)
@@ -686,8 +713,14 @@ class CineSenseRecommender:
                 user_model = self._get_user_model(user_id)
                 preference_score = user_model.get_preference_score(movie['movie_id'])
                 
-                # Combined score
-                final_score = 0.5 * content_score + 0.3 * preference_score + 0.2 * (movie.get('elo_score', 1500) / 3000)
+                # Combined score. The ELO term is normalized to [0, 1] via the
+                # shared helper so this path matches the production path's scale
+                # for the `recommendation_score` key.
+                final_score = (
+                    0.5 * content_score +
+                    0.3 * preference_score +
+                    0.2 * _normalize_elo(movie.get('elo_score', Config.INITIAL_ELO_SCORE))
+                )
                 
                 movie_scores.append({
                     **movie,
@@ -872,6 +905,21 @@ class CineSenseRecommender:
             movie1 = random.choice(known_movies)
             movie2 = random.choice(explore_movies)
             
+            # Never return the same movie twice (known/explore may overlap).
+            def _key(m):
+                return (m or {}).get('movie_id') or (m or {}).get('tmdb_id') or (m or {}).get('id')
+            
+            if _key(movie1) is not None and _key(movie1) == _key(movie2):
+                alternatives = [m for m in explore_movies if _key(m) != _key(movie1)]
+                if not alternatives:
+                    alternatives = [m for m in known_movies if _key(m) != _key(movie1)]
+                if alternatives:
+                    movie2 = random.choice(alternatives)
+            
+            if not movie1 or not movie2:
+                logger.error("Could not build a valid lazy comparison pair")
+                return None, None
+            
             # Cache these movies
             self.cache.put_movie(movie1.get('id') or movie1.get('movie_id'), movie1)
             self.cache.put_movie(movie2.get('id') or movie2.get('movie_id'), movie2)
@@ -882,7 +930,7 @@ class CineSenseRecommender:
             logger.error(f"Error in lazy comparison pair: {e}")
             return None, None
     
-    def get_recommendations_lazy(self, user_id, n=20):
+    def get_recommendations_lazy(self, user_id, n=20, strategy=None):
         """
         LAZY LOADING: Get recommendations using candidate generation
         
@@ -896,16 +944,27 @@ class CineSenseRecommender:
         Args:
             user_id: User identifier
             n: Number of recommendations (default 20)
+            strategy: Candidate strategy ('mixed', 'genre', 'popularity',
+                'exploration'). Advisory: when omitted or unknown, the configured
+                ``Config.CANDIDATE_STRATEGY`` is used.
         
         Returns:
             List of movie dictionaries with scores
         """
         try:
+            # Unknown/None strategies fall back to the configured default so an
+            # unexpected API value cannot silently yield an empty candidate set.
+            valid_strategies = ('mixed', 'genre', 'popularity', 'exploration')
+            if strategy not in valid_strategies:
+                if strategy is not None:
+                    logger.warning(f"Unknown strategy '{strategy}', using '{Config.CANDIDATE_STRATEGY}'")
+                strategy = Config.CANDIDATE_STRATEGY
+            
             # Step 1: Generate candidates (200-500 movies, not all!)
             candidates = self.candidate_gen.generate_candidates(
                 user_id=user_id,
                 target_count=Config.CANDIDATE_COUNT,
-                strategy=Config.CANDIDATE_STRATEGY
+                strategy=strategy
             )
             
             if not candidates:
@@ -1021,24 +1080,45 @@ class CineSenseRecommender:
         Fit feature encoders from candidate movies
         
         Lazy fitting - only when needed
+        
+        Only genre NAMES are used to fit the shared encoder. Numeric TMDB genre
+        IDs (e.g. '28') are skipped so the encoder vocabulary is not contaminated
+        with IDs for genres that are later matched by name.
         """
         if self.encoders_fitted:
             return
         
         try:
-            # Extract features from candidates
+            # Extract genre names only (skip numeric IDs / name-less entries)
             all_genres = []
             all_directors = []
             all_actors = []
             
             for movie in candidates:
-                genres = movie.get('genre_ids', []) or movie.get('genres', [])
-                all_genres.append([str(g) if isinstance(g, int) else g.get('name', g) for g in genres])
+                raw_genres = movie.get('genre_ids', []) or movie.get('genres', [])
+                names = []
+                for g in raw_genres:
+                    if isinstance(g, dict):
+                        name = g.get('name')
+                    elif isinstance(g, str):
+                        # Ignore bare numeric IDs from TMDB genre_ids
+                        name = None if g.strip().isdigit() else g
+                    else:
+                        name = None
+                    if name and str(name).strip():
+                        names.append(str(name).strip())
+                all_genres.append(names)
                 
                 # Directors and actors would need additional API calls
                 # For now, use empty lists
                 all_directors.append([])
                 all_actors.append([])
+            
+            if not any(all_genres):
+                # No usable genre names in the candidate pool - leave the
+                # encoders unfitted rather than training them on ID strings.
+                logger.info("Skipping encoder fit: candidates expose no genre names")
+                return
             
             # Fit encoders
             self.genre_encoder.fit(all_genres)

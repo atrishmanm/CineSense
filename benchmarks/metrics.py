@@ -19,8 +19,7 @@ Metrics implemented
 from __future__ import annotations
 
 import math
-from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Set
 
 import numpy as np
 

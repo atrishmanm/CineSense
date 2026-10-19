@@ -1,26 +1,35 @@
 """
 CineSense Feature Testing Script
-Test all integrated features with example API calls
+Test all integrated features with example API calls.
+
+These tests require a live server on BASE_URL. When the server is not
+reachable they are skipped (not failed) so `pytest -q` stays green offline.
 """
 
-import requests
-import json
+import sys
 from time import sleep
 
 import pytest
+import requests
 
 BASE_URL = "http://localhost:5000"
+PROBE_TIMEOUT = 2.0
 
 
-def _server_up() -> bool:
+def _server_up(timeout=PROBE_TIMEOUT) -> bool:
+    """Probe the server with a short timeout (never at import time)."""
     try:
-        return requests.get(BASE_URL, timeout=5).status_code == 200
+        return requests.get(BASE_URL, timeout=timeout).status_code == 200
     except Exception:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _server_up(), reason="live server at localhost:5000 not running")
+@pytest.fixture(autouse=True)
+def _require_live_server():
+    """Skip every test in this module when the live server is unreachable."""
+    if not _server_up():
+        pytest.skip("live server at localhost:5000 not running")
+
 
 def print_result(feature, status, details=""):
     symbol = "✅" if status else "❌"
@@ -28,160 +37,158 @@ def print_result(feature, status, details=""):
     if details:
         print(f"   → {details}")
 
+
 def test_server():
     """Test if server is running"""
     response = requests.get(BASE_URL, timeout=5)
     assert response.status_code == 200
     print_result("Server Status", True, "CineSense is running")
 
+
 def test_chat():
     """Test conversational AI"""
     print("\n🤖 Testing Conversational AI...")
-    try:
-        response = requests.post(
-            f"{BASE_URL}/api/chat",
-            json={"message": "Recommend me a thrilling sci-fi movie"},
-            timeout=30
-        )
-        if response.status_code == 200:
-            data = response.json()
-            print_result("Chatbot", True, f"Response: {data.get('response', '')[:100]}...")
-        else:
-            print_result("Chatbot", False, f"Status: {response.status_code}")
-    except Exception as e:
-        print_result("Chatbot", False, str(e))
+    response = requests.post(
+        f"{BASE_URL}/api/chat",
+        json={"message": "Recommend me a thrilling sci-fi movie"},
+        timeout=120,
+    )
+    assert response.status_code == 200, f"chat returned {response.status_code}"
+    data = response.json()
+    assert isinstance(data, dict), "chat response must be a JSON object"
+    assert "response" in data or "message" in data, "chat response missing text field"
+    print_result("Chatbot", True, f"Response: {str(data.get('response', data))[:100]}...")
+
 
 def test_mood_recs():
     """Test mood-based recommendations"""
     print("\n😊 Testing Mood Recommendations...")
-    try:
-        response = requests.post(
-            f"{BASE_URL}/api/mood-recommendations",
-            json={"mood": "excited", "limit": 5},
-            timeout=30
-        )
-        if response.status_code == 200:
-            data = response.json()
-            movies = len(data.get('recommendations', []))
-            print_result("Mood Detection", True, f"Found {movies} movies for 'excited' mood")
-        else:
-            print_result("Mood Detection", False, f"Status: {response.status_code}")
-    except Exception as e:
-        print_result("Mood Detection", False, str(e))
+    response = requests.post(
+        f"{BASE_URL}/api/mood-recommendations",
+        json={"mood": "excited", "limit": 5},
+        timeout=60,
+    )
+    assert response.status_code == 200, f"mood endpoint returned {response.status_code}"
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "recommendations" in data, "mood response missing 'recommendations'"
+    assert isinstance(data["recommendations"], list)
+    print_result("Mood Detection", True, f"Found {len(data['recommendations'])} movies for 'excited' mood")
+
 
 def test_trending():
     """Test trending detection"""
     print("\n📈 Testing Trending Movies...")
-    try:
-        response = requests.get(f"{BASE_URL}/api/trending?limit=10", timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            count = len(data.get('trending', []))
-            print_result("Trending Detection", True, f"Found {count} trending movies")
-        else:
-            print_result("Trending Detection", False, f"Status: {response.status_code}")
-    except Exception as e:
-        print_result("Trending Detection", False, str(e))
+    response = requests.get(f"{BASE_URL}/api/trending?limit=10", timeout=60)
+    assert response.status_code == 200, f"trending returned {response.status_code}"
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "trending" in data, "trending response missing 'trending'"
+    assert isinstance(data["trending"], list)
+    print_result("Trending Detection", True, f"Found {len(data['trending'])} trending movies")
+
 
 def test_viral():
     """Test viral detection"""
     print("\n🔥 Testing Viral Detection...")
-    try:
-        response = requests.get(f"{BASE_URL}/api/viral?limit=10", timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            count = len(data.get('viral', []))
-            print_result("Viral Detection", True, f"Found {count} viral movies")
-        else:
-            print_result("Viral Detection", False, f"Status: {response.status_code}")
-    except Exception as e:
-        print_result("Viral Detection", False, str(e))
+    response = requests.get(f"{BASE_URL}/api/viral?limit=10", timeout=60)
+    assert response.status_code == 200, f"viral returned {response.status_code}"
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "viral" in data, "viral response missing 'viral'"
+    assert isinstance(data["viral"], list)
+    print_result("Viral Detection", True, f"Found {len(data['viral'])} viral movies")
+
 
 def test_social_endpoints():
     """Test social feature endpoints"""
     print("\n👥 Testing Social Features...")
-    
-    # These require authentication, so we just check they exist
+
+    # These require authentication, so they must be either protected (401)
+    # or return a JSON object (200).
     endpoints = [
         '/api/social/friends/list',
         '/api/social/friends/requests',
         '/api/social/watchparty/upcoming',
     ]
-    
+
     for endpoint in endpoints:
-        try:
-            response = requests.get(f"{BASE_URL}{endpoint}", timeout=5)
-            if response.status_code == 401:
-                print_result(f"Social: {endpoint}", True, "Endpoint protected (Auth required)")
-            elif response.status_code == 200:
-                print_result(f"Social: {endpoint}", True, "Endpoint accessible")
-            else:
-                print_result(f"Social: {endpoint}", False, f"Status: {response.status_code}")
-        except Exception as e:
-            print_result(f"Social: {endpoint}", False, str(e))
+        response = requests.get(f"{BASE_URL}{endpoint}", timeout=10)
+        assert response.status_code in (200, 401), (
+            f"{endpoint} returned unexpected {response.status_code}")
+        if response.status_code == 200:
+            assert isinstance(response.json(), dict), f"{endpoint} did not return JSON"
+            print_result(f"Social: {endpoint}", True, "Endpoint accessible")
+        else:
+            print_result(f"Social: {endpoint}", True, "Endpoint protected (Auth required)")
+
 
 def test_core_routes():
     """Test core application routes"""
     print("\n🎬 Testing Core Routes...")
-    
+
     routes = {
         '/': 'Home Page',
         '/search': 'Search',
         '/compare': 'Compare',
     }
-    
+
     for route, name in routes.items():
-        try:
-            response = requests.get(f"{BASE_URL}{route}", timeout=5)
-            if response.status_code == 200:
-                print_result(name, True, "Page loads successfully")
-            else:
-                print_result(name, False, f"Status: {response.status_code}")
-        except Exception as e:
-            print_result(name, False, str(e))
+        response = requests.get(f"{BASE_URL}{route}", timeout=10)
+        assert response.status_code == 200, f"{route} returned {response.status_code}"
+        assert response.text, f"{route} returned an empty body"
+        print_result(name, True, "Page loads successfully")
+
 
 def main():
     print("=" * 70)
     print("🎬 CINESENSE - FEATURE TESTING SUITE")
     print("=" * 70)
-    
-    # Test server first
-    try:
-        test_server()
-    except Exception:
+
+    if not _server_up():
         print("\n❌ Server not running. Start with: python app_integrated.py")
-        return
-    
+        return 1
+
     print("\nTesting all features... (This may take 1-2 minutes)\n")
-    
-    # Test all features
-    test_core_routes()
-    test_chat()
-    sleep(2)  # Prevent overwhelming the server
-    test_mood_recs()
-    sleep(2)
-    test_trending()
-    sleep(2)
-    test_viral()
-    sleep(2)
-    test_social_endpoints()
-    
+
+    checks = [
+        ("Server Status", test_server),
+        ("Core Routes", test_core_routes),
+        ("Chatbot", test_chat),
+        ("Mood Detection", test_mood_recs),
+        ("Trending Detection", test_trending),
+        ("Viral Detection", test_viral),
+        ("Social Features", test_social_endpoints),
+    ]
+
+    failures = 0
+    for name, check in checks:
+        try:
+            check()
+        except Exception as e:  # noqa: BLE001 - CLI harness reports all failures
+            failures += 1
+            print_result(name, False, str(e))
+        sleep(1)  # Prevent overwhelming the server
+
     print("\n" + "=" * 70)
     print("✨ Testing Complete!")
     print("=" * 70)
     print("\n📊 Summary:")
-    print("   • All core endpoints are operational")
-    print("   • AI features are responding")
-    print("   • Social features are protected and ready")
-    print("   • Server is stable and running on CUDA")
-    print("\n🎉 CineSense is fully operational!")
+    print(f"   • Checks run: {len(checks)}")
+    print(f"   • Failures: {failures}")
     print("\n🌐 Access the app at: http://localhost:5000")
     print("💬 Try the chat UI at: http://localhost:5000/chat-ui")
 
+    if failures:
+        print("\n❌ CineSense feature checks FAILED!")
+        return 1
+    print("\n🎉 CineSense is fully operational!")
+    return 0
+
+
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except KeyboardInterrupt:
         print("\n\n⚠️  Testing interrupted by user")
-    except Exception as e:
-        print(f"\n\n❌ Error: {e}")
+        sys.exit(130)

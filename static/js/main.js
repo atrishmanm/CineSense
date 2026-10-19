@@ -131,7 +131,7 @@ const API = {
     },
     
     async getMoviesByGenre(genre, limit = 20) {
-        return this.request(`/movie/by-genre/${encodeURIComponent(genre)}?limit=${limit}`);
+        return this.request(`/movie/by-genre?genre=${encodeURIComponent(genre)}&limit=${limit}`);
     },
     
     // Lazy Loading Endpoints

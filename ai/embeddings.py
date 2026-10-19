@@ -4,7 +4,6 @@ Content-based filtering using movie and user feature vectors
 """
 
 import numpy as np
-from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
 from config import Config
 import logging

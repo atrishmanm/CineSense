@@ -16,7 +16,23 @@ import random
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
+
+
+class _Flight:
+    """Shared result holder for an in-flight Singleflight call.
+
+    Waiters hold a reference to the same object as the leader, so the
+    dictionary entry can be removed as soon as the leader finishes without
+    any waiter raising KeyError.
+    """
+
+    __slots__ = ("event", "value", "error")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.value: Any = None
+        self.error: Optional[Exception] = None
 
 
 class Singleflight:
@@ -28,45 +44,36 @@ class Singleflight:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._calls: Dict[str, Tuple[threading.Event, Any, Optional[Exception]]] = {}
+        self._calls: Dict[str, _Flight] = {}
 
     def do(self, key: str, fn: Callable[[], Any]) -> Any:
-        self._lock.acquire()
-        if key in self._calls:
-            # Another call is already in progress; wait for it
-            event, _, _ = self._calls[key]
-            self._lock.release()
-            event.wait()
-            # Retrieve completed result
-            self._lock.acquire()
-            _, val, err = self._calls[key]
-            self._lock.release()
-            if err:
-                raise err
-            return val
+        with self._lock:
+            flight = self._calls.get(key)
+            is_leader = flight is None
+            if is_leader:
+                flight = _Flight()
+                self._calls[key] = flight
 
-        # First caller: create event and register
-        event = threading.Event()
-        self._calls[key] = (event, None, None)
-        self._lock.release()
+        if not is_leader:
+            # Another call is already in progress; wait for it and share the result
+            flight.event.wait()
+            if flight.error is not None:
+                raise flight.error
+            return flight.value
 
-        val = None
-        err = None
+        # First caller: execute, then publish the result and wake waiters
         try:
-            val = fn()
-        except Exception as e:
-            err = e
+            flight.value = fn()
+        except Exception as e:  # noqa: BLE001 - re-raised to all waiters below
+            flight.error = e
+        finally:
+            with self._lock:
+                self._calls.pop(key, None)
+            flight.event.set()
 
-        self._lock.acquire()
-        self._calls[key] = (event, val, err)
-        event.set()
-        # Clean up after all waiters are unblocked
-        del self._calls[key]
-        self._lock.release()
-
-        if err:
-            raise err
-        return val
+        if flight.error is not None:
+            raise flight.error
+        return flight.value
 
 
 class XFetchCache:

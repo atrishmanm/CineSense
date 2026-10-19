@@ -5,8 +5,9 @@ python-dotenv==1.0.0
 werkzeug>=3.0.0
 
 # Database
+# NOTE: only mysql-connector-python is imported (database/db_manager.py).
+# PyMySQL was removed -- it was shipped but imported nowhere.
 mysql-connector-python==8.2.0
-PyMySQL==1.1.0
 
 # AI/ML Core
 numpy>=1.26.0
@@ -49,3 +50,9 @@ python-multipart>=0.0.6  # For file uploads
 
 # Production Server
 gunicorn==21.2.0
+
+# ==========================================
+# Development / Testing (not required at runtime)
+# ==========================================
+pytest>=7.4.0
+matplotlib>=3.8.0  # scripts/generate_*_diagram.py

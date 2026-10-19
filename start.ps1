@@ -1,5 +1,10 @@
-# CineSense Startup Script (PowerShell)
-# Run this script to start the CineSense application
+﻿# CineSense Startup Script (PowerShell) — CANONICAL launcher.
+# Run this script to start the CineSense application.
+# (start-cinesense.ps1 delegates here; prefer this script.)
+#
+# Options:
+#   [1] Fully Integrated App with ALL Features (app_integrated.py)  <-- default
+#   [2] Quick Start / training helper (scripts/quick_start.py)
 
 Write-Host "`n╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "║         CineSense - AI Movie Recommendation Platform         ║" -ForegroundColor Cyan
@@ -66,33 +71,24 @@ if ($LASTEXITCODE -eq 0) {
 # Ask which app to start
 Write-Host "`n════════════════════════════════════════════════════════════════" -ForegroundColor White
 Write-Host "Select application mode:" -ForegroundColor Cyan
-Write-Host "  [1] Standard App (app.py)" -ForegroundColor White
-Write-Host "  [2] Fully Integrated App with ALL Features (app_integrated.py)" -ForegroundColor Yellow
-Write-Host "  [3] Quick Start Script (scripts/quick_start.py)" -ForegroundColor White
+Write-Host "  [1] Fully Integrated App with ALL Features (app_integrated.py)" -ForegroundColor Yellow
+Write-Host "  [2] Quick Start / training helper (scripts/quick_start.py)" -ForegroundColor White
 Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor White
 
-$choice = Read-Host "Enter your choice (1-3)"
+$choice = Read-Host "Enter your choice (1-2)"
 
 Write-Host ""
 Write-Host "🚀 Starting CineSense..." -ForegroundColor Green
 Write-Host "═══════════════════════════════════════════════════════════════`n" -ForegroundColor Green
 
 switch ($choice) {
-    "1" {
-        Write-Host "Starting Standard App..." -ForegroundColor Cyan
-        python app.py
-    }
     "2" {
-        Write-Host "Starting Fully Integrated App..." -ForegroundColor Cyan
-        Write-Host "⚡ Loading AI models (may take a few moments)..." -ForegroundColor Yellow
-        python app_integrated.py
-    }
-    "3" {
         Write-Host "Starting Quick Start..." -ForegroundColor Cyan
         python scripts/quick_start.py
     }
     default {
-        Write-Host "Starting Fully Integrated App (default)..." -ForegroundColor Cyan
+        Write-Host "Starting Fully Integrated App..." -ForegroundColor Cyan
+        Write-Host "⚡ Loading AI models (may take a few moments)..." -ForegroundColor Yellow
         python app_integrated.py
     }
 }

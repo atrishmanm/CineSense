@@ -4,11 +4,9 @@ Integrates Two-Tower NCF + Content-Aware Hybrid Model with Flask app
 """
 
 import torch
-import numpy as np
 import logging
 from pathlib import Path
-from typing import List, Dict
-from ai.inference_pipeline import load_production_model, ProductionRecommender
+from ai.inference_pipeline import load_production_model
 from database.db_manager import db
 
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +69,7 @@ class NetflixRecommender:
         Returns:
             recommendations: List[Dict] with movie details
         """
-        if not self._model_loaded:
+        if not self._model_loaded or self.recommender is None:
             logger.warning("Model not loaded, returning empty recommendations")
             return []
         
@@ -100,15 +98,20 @@ class NetflixRecommender:
     def _get_user_history(self, user_id):
         """Get user's watch history from database"""
         try:
-            # Get user's rated movies
-            ratings = db.get_user_ratings(user_id)
+            # NOTE: there is no db.get_user_ratings() method; derive the watch
+            # history from the real pairwise interaction history instead.
+            interactions = db.get_user_interactions(user_id, limit=200)
             
             history = []
-            for rating in ratings:
+            for inter in interactions:
+                movie_id = inter.get('chosen_movie_id') or inter.get('movie_1_id')
+                if not movie_id:
+                    continue
                 history.append({
-                    'movieId': rating['movie_id'],
-                    'rating': rating['rating'],
-                    'timestamp': rating.get('timestamp')
+                    'movieId': movie_id,
+                    # Chosen movies are treated as positive implicit feedback.
+                    'rating': 5.0 if inter.get('chosen_movie_id') == movie_id else 3.0,
+                    'timestamp': inter.get('timestamp')
                 })
             
             return history
@@ -158,7 +161,7 @@ class NetflixRecommender:
         Get movies similar to a given movie
         Uses movie embeddings from the model
         """
-        if not self._model_loaded:
+        if not self._model_loaded or self.recommender is None:
             logger.warning("Model not loaded, returning empty similar movies")
             return []
         
@@ -232,7 +235,7 @@ class NetflixRecommender:
         Returns:
             predicted_rating: float (0-5 scale)
         """
-        if not self._model_loaded:
+        if not self._model_loaded or self.recommender is None:
             return 2.5  # Default rating
         
         try:

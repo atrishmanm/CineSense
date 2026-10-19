@@ -20,8 +20,6 @@ from benchmarks.data_loader import Movie
 from benchmarks.metrics import (
     ndcg_at_k,
     recall_at_k,
-    precision_at_k,
-    hit_rate_at_k,
     catalog_coverage,
     mean_self_information,
     intra_list_diversity,
@@ -60,9 +58,9 @@ def run_diversity_and_explanation_benchmark(
             if not cands:
                 continue
 
-            # Stage 1: score candidates
-            scored = [(it, rec.score_item(uid, it)) for it in cands]
-            scored.sort(key=lambda x: x[1], reverse=True)
+            # Stage 1: score candidates (sorted for deterministic tie order)
+            scored = [(it, rec.score_item(uid, it)) for it in sorted(cands)]
+            scored.sort(key=lambda x: (-x[1], x[0]))
 
             if lam == 0.0:
                 top_items = [it for it, _ in scored[:k]]

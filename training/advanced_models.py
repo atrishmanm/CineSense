@@ -5,7 +5,6 @@ Designed to achieve RMSE < 0.75 (Netflix-level performance)
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class AttentionLayer(nn.Module):

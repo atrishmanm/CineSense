@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple, Any
+from typing import Dict, List, Set, Any
 import numpy as np
 
-from benchmarks.data_loader import Rating, Movie
+from benchmarks.data_loader import Movie
 from benchmarks.metrics import ndcg_at_k, recall_at_k
 
 
@@ -42,7 +42,7 @@ def run_two_stage_benchmark(
     for r in splits["train"]:
         if r.rating >= 4.0:
             item_pop_counts[r.item_id] += 1
-    sorted_pop = sorted(item_pop_counts.items(), key=lambda x: x[1], reverse=True)
+    sorted_pop = sorted(item_pop_counts.items(), key=lambda x: (-x[1], x[0]))
     global_pop_order = [it for it, _ in sorted_pop]
 
     # 2. Content profiles
@@ -61,7 +61,7 @@ def run_two_stage_benchmark(
             elo_scores[r.item_id] = elo_scores.get(r.item_id, 1500.0) + 10.0
         elif r.rating <= 2.0:
             elo_scores[r.item_id] = elo_scores.get(r.item_id, 1500.0) - 10.0
-    sorted_elo = sorted(elo_scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_elo = sorted(elo_scores.items(), key=lambda x: (-x[1], x[0]))
     global_elo_order = [it for it, _ in sorted_elo]
 
     # Measure Candidate Overlap between sources (top 100)
@@ -75,13 +75,13 @@ def run_two_stage_benchmark(
         if prof is not None and np.linalg.norm(prof) > 0:
             sims = [(mid, float(np.dot(prof, movies[mid].genres) / (np.linalg.norm(prof) * np.linalg.norm(movies[mid].genres) + 1e-8)))
                     for mid in catalog]
-            sims.sort(key=lambda x: x[1], reverse=True)
+            sims.sort(key=lambda x: (-x[1], x[0]))
             top_content_100 = {mid for mid, _ in sims[:100]}
             jaccard_cp = len(top_content_100 & top_pop_100) / len(top_content_100 | top_pop_100)
             content_pop_overlaps.append(jaccard_cp)
     mean_content_pop_overlap = float(np.mean(content_pop_overlaps)) if content_pop_overlaps else 0.0
 
-    print(f"  Source Overlap (Top 100 Jaccard):")
+    print("  Source Overlap (Top 100 Jaccard):")
     print(f"    Popularity vs ELO:       {jaccard_pop_elo:.3f}")
     print(f"    Content vs Popularity:   {mean_content_pop_overlap:.3f}")
 
@@ -96,9 +96,9 @@ def run_two_stage_benchmark(
         unique_candidates = set()
 
         # Split budget across sources: 40% Content, 30% Pop, 30% ELO
+        # (ELO leg fills the remaining budget implicitly)
         b_content = int(budget * 0.4)
         b_pop = int(budget * 0.3)
-        b_elo = budget - b_content - b_pop
 
         for uid in eval_users:
             seen = user_train_items.get(uid, set())
@@ -118,7 +118,7 @@ def run_two_stage_benchmark(
                         m_norm = np.linalg.norm(movies[mid].genres)
                         sim = float(np.dot(prof, movies[mid].genres) / (p_norm * m_norm + 1e-8))
                         sims.append((mid, sim))
-                sims.sort(key=lambda x: x[1], reverse=True)
+                sims.sort(key=lambda x: (-x[1], x[0]))
                 for mid, _ in sims[:b_content]:
                     candidates.add(mid)
 
@@ -148,7 +148,7 @@ def run_two_stage_benchmark(
             # Stage 2: Hybrid Reranking on Candidates
             t1 = time.perf_counter()
             scored_candidates = []
-            for it in candidates:
+            for it in sorted(candidates):  # deterministic tie order
                 # Content score
                 if prof is not None and np.linalg.norm(prof) > 0:
                     c_sim = float(np.dot(prof, movies[it].genres) / (np.linalg.norm(prof) * np.linalg.norm(movies[it].genres) + 1e-8))
@@ -164,7 +164,7 @@ def run_two_stage_benchmark(
                 hybrid_score = 0.50 * c_score + 0.30 * p_score + 0.20 * e_score
                 scored_candidates.append((it, hybrid_score))
 
-            scored_candidates.sort(key=lambda x: x[1], reverse=True)
+            scored_candidates.sort(key=lambda x: (-x[1], x[0]))
             top_final = [it for it, _ in scored_candidates[:k_final]]
             t_rerank = (time.perf_counter() - t1) * 1000
             rerank_latencies.append(t_rerank)

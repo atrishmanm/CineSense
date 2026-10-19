@@ -13,6 +13,11 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY') or secrets.token_hex(32)
     PORT = int(os.getenv('PORT', 5000))
     DEBUG = os.getenv('FLASK_ENV') == 'development'
+
+    # Request/upload size limit. The app itself enforces this in
+    # app_integrated.py via app.config['MAX_CONTENT_LENGTH'] = 16 MB.
+    # Per-image size/content validation for upload routes (/api/visual-search,
+    # /api/text-to-image-search) belongs in those route handlers (api/).
     
     # Database
     DB_CONFIG = {
@@ -26,10 +31,24 @@ class Config:
     }
     
     # Redis Configuration (for caching)
+    # NOTE: app_integrated.py reads REDIS_HOST/PORT/DB directly via os.getenv
+    # (see create_app) and passes them to ai.redis_cache.get_redis_cache().
+    # REDIS_PASSWORD is exposed/consumed via REDIS_CONFIG below; the direct
+    # read in app_integrated.py still omits it (known gap outside this file).
     REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
     REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
     REDIS_DB = int(os.getenv('REDIS_DB', 0))
     REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', None)
+
+    # Canonical aggregate for Redis consumers. ai.redis_cache.RedisCache accepts
+    # host/port/db/password, so callers can use Config.REDIS_CONFIG instead of
+    # ad-hoc os.getenv reads.
+    REDIS_CONFIG = {
+        'host': REDIS_HOST,
+        'port': REDIS_PORT,
+        'db': REDIS_DB,
+        'password': REDIS_PASSWORD,
+    }
     
     # TMDB API
     TMDB_API_KEY = os.getenv('TMDB_API_KEY', '')
@@ -38,7 +57,7 @@ class Config:
     
     # AI Configuration
     LEARNING_RATE = float(os.getenv('LEARNING_RATE', 0.1))
-    EXPLORATION_RATE = float(os.getenv('EXPLORATION_RATE', 0.2))
+    EXPLORATION_RATE = float(os.getenv('EXPLORATION_RATE', 0.2))  # reserved / not yet wired (ai/reinforcement.py hardcodes 0.2)
     INITIAL_ELO_SCORE = int(os.getenv('INITIAL_ELO_SCORE', 1500))
     
     # Feature Vector Dimensions
@@ -59,7 +78,7 @@ class Config:
     
     # Model Paths
     MODEL_DIR = os.getenv('MODEL_DIR', './model')
-    CHECKPOINT_DIR = os.getenv('CHECKPOINT_DIR', './checkpoints')
+    CHECKPOINT_DIR = os.getenv('CHECKPOINT_DIR', './checkpoints')  # reserved / not yet wired
     
     # Probabilistic Decision Making
     USE_SOFTMAX_SELECTION = True  # Use probability distributions instead of argmax
@@ -74,8 +93,8 @@ class Config:
     }
     
     # Recommendation Settings
-    RECOMMENDATION_BATCH_SIZE = 20
-    COMPARISON_BATCH_SIZE = 2
+    RECOMMENDATION_BATCH_SIZE = 20  # reserved / not yet wired
+    COMPARISON_BATCH_SIZE = 2  # reserved / not yet wired (ai/reinforcement.py hardcodes top_k=2)
     MIN_INTERACTIONS_FOR_PERSONALIZATION = 5
     
     # Natural Language Generation
@@ -86,8 +105,8 @@ class Config:
     
     # Sliding Window Cache
     MOVIE_CACHE_SIZE = 100  # Keep only 100 movies in memory
-    VECTOR_CACHE_SIZE = 500  # Cache 500 movie vectors
-    CACHE_REFILL_THRESHOLD = 0.3  # Refill when 30% full
+    VECTOR_CACHE_SIZE = 500  # reserved / not yet wired (ai/cache_manager.py hardcodes 500)
+    CACHE_REFILL_THRESHOLD = 0.3  # reserved / not yet wired (ai/cache_manager.py hardcodes 0.3)
     
     # Candidate Generation
     CANDIDATE_COUNT = 300  # Generate 200-500 candidates before ranking
@@ -95,20 +114,20 @@ class Config:
     
     # TMDB API Pagination
     MAX_PAGES_PER_FETCH = 10  # Fetch max 10 pages (200 movies) at a time
-    MOVIES_PER_PAGE = 20  # TMDB standard
-    
+    MOVIES_PER_PAGE = 20  # reserved / not yet wired (frontend paginates client-side)
+
     # Pairwise Comparison Strategy
-    PAIRWISE_KNOWN_RATIO = 0.5  # 50% known movies, 50% exploration
+    PAIRWISE_KNOWN_RATIO = 0.5  # reserved / not yet wired
     PAIRWISE_BATCH_SIZE = 30  # Generate 30 movies for pairwise pool
-    
+
     # Memory Optimization
-    STORE_ONLY_INTERACTED = True  # Only save movies user interacted with
-    LAZY_EMBEDDING = True  # Compute embeddings on-demand, not precomputed
-    EVICTION_STRATEGY = 'lru'  # 'lru' (Least Recently Used)
-    
+    STORE_ONLY_INTERACTED = True  # reserved / not yet wired
+    LAZY_EMBEDDING = True  # reserved / not yet wired
+    EVICTION_STRATEGY = 'lru'  # reserved / not yet wired
+
     # Recommendation Pipeline
-    USE_CANDIDATE_GENERATION = True  # Enable candidate generation (vs scoring all)
-    FINAL_RECOMMENDATION_COUNT = 20  # Return top 20 after ranking candidates
+    USE_CANDIDATE_GENERATION = True  # reserved / not yet wired
+    FINAL_RECOMMENDATION_COUNT = 20  # reserved / not yet wired
 
     # Deep Learning Ensemble (NeuMF V2) — OFFLINE / RESEARCH ONLY.
     # Checkpoints are not bundled and DL scoring stays disabled unless

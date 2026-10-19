@@ -19,7 +19,6 @@ D. **Hybrid** -- weighted combination of A, B, and C with configurable
 
 from __future__ import annotations
 
-import random
 from collections import Counter, defaultdict
 from typing import Dict, List, Set
 
@@ -45,7 +44,9 @@ class BaseRecommender:
 
     # default top-K selection
     def recommend(self, user_id: int, k: int, candidates: Set[int]) -> List[int]:
-        scored = [(it, self.score_item(user_id, it)) for it in candidates]
+        # Iterate candidates in a stable order so equal scores always break
+        # ties the same way regardless of PYTHONHASHSEED / set iteration order.
+        scored = [(it, self.score_item(user_id, it)) for it in sorted(candidates)]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [it for it, _ in scored[:k]]
 
@@ -57,7 +58,7 @@ class BaseRecommender:
         catalog: Set[int],
     ) -> Dict[int, List[int]]:
         recs: Dict[int, List[int]] = {}
-        for uid in eval_users:
+        for uid in sorted(eval_users):
             cands = catalog - user_train_items.get(uid, set())
             if cands:
                 recs[uid] = self.recommend(uid, k, cands)
@@ -166,7 +167,7 @@ class PreferenceEloRecommender(BaseRecommender):
 
     def fit(self, train_ratings: List[Rating], movies: Dict[int, Movie]) -> None:
         items = {r.item_id for r in train_ratings}
-        for it in items:
+        for it in sorted(items):
             self.global_elo[it] = self.initial_elo
 
         user_ratings: Dict[int, List[Rating]] = defaultdict(list)
@@ -282,12 +283,13 @@ class HybridPopularityRecommender(BaseRecommender):
         return self._hybrid.score_item(user_id, item_id)
 
     def recommend(self, user_id: int, k: int, candidates: Set[int]) -> List[int]:
-        cands = list(candidates)
+        cands = sorted(candidates)  # deterministic tie order
         h_rank = {m: r + 1 for r, m in
                   enumerate(self._hybrid.recommend(user_id, len(cands), set(cands)))}
         p_rank = {m: r + 1 for r, m in
                   enumerate(self._pop.recommend(user_id, len(cands), set(cands)))}
         fused = [(m, 1.0 / (self.rrf_k + h_rank[m]) + 1.0 / (self.rrf_k + p_rank[m]))
                  for m in cands]
-        fused.sort(key=lambda x: x[1], reverse=True)
+        # Break score ties by item id for reproducibility across runs.
+        fused.sort(key=lambda x: (-x[1], x[0]))
         return [m for m, _ in fused[:k]]

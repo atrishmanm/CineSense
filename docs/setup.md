@@ -27,7 +27,7 @@ mysql -u root -p cinesense < database/schema.sql
 python database/run_migration.py
 ```
 
-`database/schema.sql` is the single authoritative schema (28 tables, 24 views,
+`database/schema.sql` is the single authoritative schema (36 tables, 24 views,
 24 procedures, 8 functions, 11 triggers).
 
 ## Run

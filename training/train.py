@@ -4,6 +4,7 @@ Complete training pipeline with proper ML practices
 """
 
 import os
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,15 +12,24 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
 import pickle
-from pathlib import Path
 from tqdm import tqdm
 import logging
-from datetime import datetime
 
 from training.models import get_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+SEED = 42
+
+
+def set_seed(seed: int = SEED) -> None:
+    """Seed python/numpy/torch RNGs for reproducible training runs."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 class MovieLensDataset(Dataset):
@@ -148,6 +158,8 @@ def train_model(model_type='hybrid', epochs=10, batch_size=1024, learning_rate=0
     logger.info("="*80)
     logger.info(f"TRAINING {model_type.upper()} MODEL")
     logger.info("="*80)
+
+    set_seed(SEED)
     
     # Device detection with GPU info
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,7 +185,11 @@ def train_model(model_type='hybrid', epochs=10, batch_size=1024, learning_rate=0
     logger.info(f"Movies: {num_movies:,}")
     logger.info(f"Ratings: {len(df):,}")
     
-    # Time-based split (CRITICAL: prevents data leakage)
+    # Time-based split (CRITICAL: prevents leakage ACROSS the time boundary)
+    # NOTE: this is a *global* chronological split: the last 20% of all ratings
+    # by timestamp form validation. It is NOT a per-user split, so an
+    # individual user can be entirely absent from one side of the boundary.
+    # See benchmarks/data_loader.create_splits for a per-user temporal split.
     logger.info("\nCreating time-based train/validation split...")
     df = df.sort_values("timestamp")
     
@@ -196,7 +212,13 @@ def train_model(model_type='hybrid', epochs=10, batch_size=1024, learning_rate=0
     train_dataset = MovieLensDataset(train_df, plot_embeddings)
     val_dataset = MovieLensDataset(val_df, plot_embeddings)
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        generator=torch.Generator().manual_seed(SEED),
+    )
     val_loader = DataLoader(val_dataset, batch_size=batch_size*2, shuffle=False, num_workers=0)
     
     # Create model
@@ -227,7 +249,7 @@ def train_model(model_type='hybrid', epochs=10, batch_size=1024, learning_rate=0
         best_rmse_from_checkpoint = checkpoint.get("best_rmse", float('inf'))
         logger.info(f"   ✓ Resumed from epoch {checkpoint['epoch']} (Best RMSE: {best_rmse_from_checkpoint:.4f})")
     else:
-        logger.info(f"\n🆕 No checkpoint found. Starting fresh training.")
+        logger.info("\n🆕 No checkpoint found. Starting fresh training.")
         best_rmse_from_checkpoint = float('inf')
     
     # Learning rate scheduler

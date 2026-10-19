@@ -1,12 +1,16 @@
 """
 Sequential Recommender using GRU/LSTM
 Models user behavior as a temporal sequence for better predictions
+
+STATUS: EXPERIMENTAL / UNUSED model variants (D401). ``train_sequential_model``
+has zero callers in the repository; the classes are kept for reference.
 """
+
+import random
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, List, Optional
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -295,18 +299,25 @@ class TransformerSequentialRecommender(nn.Module):
         return rating
 
 
-# Example training function
+# Example training function (zero callers in-repo; see module docstring)
 def train_sequential_model(
     model: nn.Module,
     train_loader,
     val_loader,
     num_epochs: int = 50,
     lr: float = 0.001,
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+    seed: int = 42,
 ):
     """
     Train sequential recommender
     """
+    # Reproducibility: seed the torch/global RNGs before model init/training.
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

@@ -6,12 +6,10 @@ STEP 3: Feature Engineering
 
 import pandas as pd
 import numpy as np
-import torch
 from sklearn.preprocessing import LabelEncoder
 from sentence_transformers import SentenceTransformer
 import pickle
 from pathlib import Path
-from tqdm import tqdm
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -143,8 +141,8 @@ def main():
     # Step 1: Encode users and movies
     df, user_enc, movie_enc = encode_users_and_movies()
     
-    # Step 2: Generate plot embeddings
-    plot_embeddings = generate_plot_embeddings()
+    # Step 2: Generate plot embeddings (side effect: artifacts written to model/)
+    generate_plot_embeddings()
     
     logger.info("\n" + "="*80)
     logger.info("✓ ALL FEATURE ENGINEERING COMPLETE!")

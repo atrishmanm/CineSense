@@ -17,7 +17,7 @@ class MultiArmedBandit:
     Balances exploration (trying new movies) with exploitation (showing good movies)
     """
     
-    def __init__(self, exploration_rate=0.2):
+    def __init__(self, exploration_rate=Config.EXPLORATION_RATE):
         """
         Initialize bandit
         

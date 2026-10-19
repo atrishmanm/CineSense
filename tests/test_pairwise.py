@@ -3,8 +3,6 @@ Unit tests for AI Layer 1: Pairwise Preference Learning
 PairwiseLearner, BradleyTerryModel, and UserPreferenceModel
 """
 
-import numpy as np
-import pytest
 from ai.pairwise_learning import PairwiseLearner, BradleyTerryModel, UserPreferenceModel
 
 

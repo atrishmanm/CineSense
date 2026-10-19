@@ -195,7 +195,7 @@ def update_schema():
     conn.close()
     
     logger.info("\n" + "=" * 60)
-    logger.info(f"Schema Update Complete")
+    logger.info("Schema Update Complete")
     logger.info(f"  Success: {success_count}")
     logger.info(f"  Errors: {error_count}")
     logger.info("=" * 60)

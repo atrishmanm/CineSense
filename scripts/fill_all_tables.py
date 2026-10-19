@@ -12,12 +12,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import string
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import requests
 
@@ -96,7 +97,9 @@ def _seed_via_api(base_url: str, min_rows: int) -> None:
         s = requests.Session()
         uname = f"synth_user_{i+1:02d}"
         email = f"{uname}@cinesense.local"
-        password = "Passw0rd!123"
+        # Seed password comes from the environment; the fallback is an explicit
+        # placeholder so no real credential is hardcoded in the script.
+        password = os.getenv("SEED_USER_PASSWORD", "CHANGE_ME_seed_password")
 
         code, data = _api_post(
             s,

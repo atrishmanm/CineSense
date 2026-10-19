@@ -8,7 +8,7 @@ Asks "which movie do you prefer?", learns ELO taste, serves hybrid neural + cont
 - [Overview](docs/overview.md) — what it is, problems, objectives
 - [Architecture](docs/architecture.md) — system design, stack, modules
 - [Data & Methods](docs/methods.md) — datasets, pipeline, models
-- [Database & API](docs/database-api.md) — schema (28 tables, 24 views, 24 procedures, 8 functions, 11 triggers) + 55 `/api` endpoints
+- [Database & API](docs/database-api.md) — schema (36 tables, 24 views, 24 procedures, 8 functions, 11 triggers) + 55 `/api` endpoints
 - [Setup & Deployment](docs/setup.md) — install, run, deploy
 - [Test Results](docs/results.md) — reproduced benchmarks (popularity NDCG@10 0.094 beats hybrid 0.030; hybrid wins coverage 5.5×)
 - [Full Audit](docs/AUDIT.md) — 651 findings with file:line (bugs, inconsistencies, robustness)

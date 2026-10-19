@@ -5,7 +5,7 @@ Handles natural language queries like "indian spy thriller" or "time loop movie"
 
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import torch
 import json
 import os

@@ -4,9 +4,12 @@ Comprehensive check of all implemented features
 """
 
 import os
-import importlib
 import sys
 from pathlib import Path
+
+# Windows consoles default to cp1252; the report uses emoji, so force UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Ensure project root is on sys.path and cwd
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -75,11 +78,6 @@ def main():
             "class": "init_social_routes",
             "description": "Friends, watch parties, lists"
         },
-        "🔬 Explainable AI": {
-            "file": "ai/_archive/explainable_recommendations.py",
-            "class": "ExplainableRecommender",
-            "description": "SHAP-based explanations"
-        },
         "📈 Trending Detection": {
             "file": "ai/trending_detector.py",
             "class": "TrendingDetector",
@@ -109,36 +107,12 @@ def main():
             "file": "inference/torchserve_handler.py",
             "class": "CineSenseRecommenderHandler",
             "description": "Production model serving"
-        },
-        "📊 Advanced Metrics": {
-            "file": "ai/_archive/advanced_metrics.py",
-            "class": "RecommendationMetrics",
-            "description": "Comprehensive evaluation"
-        },
-        "🔍 Query Understanding": {
-            "file": "ai/_archive/query_understanding.py",
-            "class": "QueryEnhancer",
-            "description": "T5-based query expansion"
-        },
-        "🎯 Reranker": {
-            "file": "ai/_archive/reranker.py",
-            "class": "SemanticReranker",
-            "description": "Cross-encoder reranking"
-        },
-        "🎨 Multi-Modal Search": {
-            "file": "ai/_archive/multimodal_search.py",
-            "class": "MultiModalSearch",
-            "description": "Text + Image search"
-        },
-        "🗄️ Vector Store": {
-            "file": "ai/_archive/vector_store.py",
-            "class": "FAISSVectorStore",
-            "description": "FAISS vector database"
         }
     }
     
     # Check all features
     implemented = 0
+    warnings = 0
     total = len(features)
     
     print(f"{Colors.BOLD}FEATURE IMPLEMENTATION STATUS:{Colors.ENDC}\n")
@@ -152,6 +126,8 @@ def main():
         
         if "✓" in status:
             implemented += 1
+        if status == "✓⚠":
+            warnings += 1
         
         status_icon = "✓✓" if status == "✓✓" else ("✓" if status == "✓" else "✗")
         print(f"{color}{status_icon}{Colors.ENDC} {feature_name:<25} "
@@ -166,7 +142,6 @@ def main():
         "/api/trending": "Trending movies detection",
         "/api/viral": "Viral movies detection",
         "/api/visual-search": "Image-based search",
-        "/api/explain/<movie_id>": "Explainable recommendations",
         "/api/social/friends/add": "Add friend",
         "/api/social/friends/list": "List friends",
         "/api/social/watchparty/create": "Create watch party",
@@ -193,8 +168,9 @@ def main():
         "friendships",
         "watch_parties",
         "watch_party_invites",
-        "movie_lists",
-        "list_movies",
+        "collaborative_lists",
+        "collaborative_list_items",
+        "collaborative_list_members",
         "chat_history",
         "ab_experiments",
         "ab_user_assignments",
@@ -211,6 +187,8 @@ def main():
     print(f"\n{Colors.BOLD}SUMMARY:{Colors.ENDC}")
     print(f"  Features Implemented: {Colors.GREEN}{implemented}/{total}{Colors.ENDC} "
           f"({Colors.GREEN}{(implemented/total)*100:.1f}%{Colors.ENDC})")
+    if warnings:
+        print(f"  {Colors.YELLOW}Warnings (file present, expected class missing): {warnings}{Colors.ENDC}")
     
     if implemented == total:
         print(f"\n  {Colors.GREEN}✓ ALL FEATURES IMPLEMENTED!{Colors.ENDC} 🎉")
@@ -240,10 +218,15 @@ def main():
     
     print(f"\n{Colors.BOLD}NEXT STEPS:{Colors.ENDC}\n")
     print("1. Start the app: python app_integrated.py")
-    print("2. Test features: python test_features.py")
-    print("3. Train models: python train_model.py (if needed)")
+    print("2. Test features: python tests/test_features.py")
+    print("3. Train models: python scripts/train_model.py (if needed)")
     print("4. Access UI: http://localhost:5000/features")
     print(f"\n{Colors.GREEN}✓ Verification complete!{Colors.ENDC}\n")
 
+    # Non-zero exit when any listed feature file is missing so callers/CI can
+    # detect regressions instead of always seeing success.
+    return 0 if implemented == total else 1
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

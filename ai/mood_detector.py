@@ -6,7 +6,6 @@ Detects user mood and recommends appropriate movies
 from transformers import pipeline
 from typing import List, Dict
 import logging
-import re
 import os
 
 logger = logging.getLogger(__name__)
@@ -260,11 +259,13 @@ class MoodBasedRecommender:
                 for genre in preferred_genres:
                     genre_movies = self.db.get_movies_by_genre(genre, limit=50)
                     if genre_movies:
-                        # Convert genre string to list for scoring
-                        for m in genre_movies:
+                        # Copy each row before normalizing the genre string so the
+                        # DB result rows are never mutated in place.
+                        for row in genre_movies:
+                            m = dict(row)
                             if isinstance(m.get('genres'), str):
                                 m['genres'] = [g.strip() for g in m['genres'].split(',') if g.strip()]
-                        movies.extend(genre_movies)
+                            movies.append(m)
                 
                 # Deduplicate by movie_id
                 seen_ids = set()
@@ -279,10 +280,11 @@ class MoodBasedRecommender:
                 # If still not enough, get top movies
                 if len(movies) < top_k:
                     top_movies = self.db.get_top_movies(limit=100)
-                    for m in top_movies:
+                    for row in top_movies:
+                        m = dict(row)
                         if isinstance(m.get('genres'), str):
                             m['genres'] = [g.strip() for g in m['genres'].split(',') if g.strip()]
-                    movies.extend(top_movies)
+                        movies.append(m)
                     # Deduplicate again
                     seen_ids2 = set()
                     unique2 = []

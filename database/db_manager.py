@@ -3,7 +3,6 @@ Database Manager for CineSense
 Handles all MySQL database operations with connection pooling
 """
 
-import mysql.connector
 from mysql.connector import pooling, Error
 from contextlib import contextmanager
 from config import Config
@@ -204,12 +203,12 @@ class DatabaseManager:
         elif media_type == 'tv':
             media_filter = "AND media_type = 'tv'"
         
-        query = f"""
-            SELECT * FROM movie_details 
+        query = """
+            SELECT * FROM movie_details
             WHERE tmdb_rating IS NOT NULL {media_filter}
             ORDER BY {order_by} DESC
             LIMIT %s OFFSET %s
-        """
+        """.format(media_filter=media_filter, order_by=order_by)
         with self.get_cursor() as cursor:
             cursor.execute(query, (limit, offset))
             return cursor.fetchall()
@@ -286,12 +285,12 @@ class DatabaseManager:
             conditions.append("media_type = 'tv'")
         
         where_clause = " AND ".join(conditions)
-        query = f"""
+        query = """
             SELECT * FROM movie_details
             WHERE {where_clause}
             ORDER BY tmdb_rating DESC
             LIMIT %s OFFSET %s
-        """
+        """.format(where_clause=where_clause)
         params.extend([limit, offset])
         
         with self.get_cursor() as cursor:
@@ -955,7 +954,7 @@ if __name__ == "__main__":
         print("Testing database connection...")
         movie_count = db.get_movie_count()
         user_count = db.get_user_count()
-        print(f"Connection successful!")
+        print("Connection successful!")
         print(f"  Movies in database: {movie_count}")
         print(f"  Users in database: {user_count}")
     except Exception as e:

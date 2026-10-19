@@ -5,8 +5,7 @@ Detects which movies are trending using velocity and acceleration metrics
 
 import numpy as np
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple
-from scipy import stats
+from typing import List, Dict
 import logging
 
 logger = logging.getLogger(__name__)

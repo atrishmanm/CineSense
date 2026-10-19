@@ -6,7 +6,6 @@ STEP 4-5: Neural Recommendation Models
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class NCF(nn.Module):

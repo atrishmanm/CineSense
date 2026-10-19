@@ -9,7 +9,6 @@ import json
 import hashlib
 from typing import Optional, Any, List, Dict
 import logging
-from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +95,8 @@ class RedisCache:
         try:
             self.client.ping()
             return True
-        except:
+        except Exception as e:
+            logger.debug(f"Redis ping failed: {e}")
             return False
     
     # ========================================================================
@@ -481,7 +481,7 @@ if __name__ == '__main__':
         
         # Get stats
         stats = cache.get_stats()
-        print(f"\nCache stats:")
+        print("\nCache stats:")
         print(f"  Keys: {stats.get('total_keys')}")
         print(f"  Memory: {stats.get('used_memory')}")
         print(f"  Hit rate: {stats.get('hit_rate', 0):.2f}%")

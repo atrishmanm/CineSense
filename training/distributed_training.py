@@ -1,19 +1,35 @@
 """
 Distributed Training with PyTorch DDP (DistributedDataParallel)
 Train models across multiple GPUs for faster convergence
+
+STATUS: EXPERIMENTAL / UNUSED (D403). Nothing in the repository calls
+``main_distributed_training``; it is a reference harness only.
 """
 
 import os
+import random
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
-from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _seed_everything(seed: int) -> None:
+    """Seed python/numpy (if available)/torch RNGs for reproducibility."""
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    try:
+        import numpy as np
+        np.random.seed(seed)
+    except ImportError:
+        pass
 
 
 def setup_distributed(rank: int, world_size: int, backend: str = 'nccl'):
@@ -76,7 +92,17 @@ def train_distributed(
     """
     # Setup
     setup_distributed(rank, world_size)
-    
+
+    # Seed per-rank (offset by rank so DDP workers don't share the exact
+    # same dropout/shuffle stream) before model construction.
+    _seed_everything(42 + rank)
+
+    # Ensure the checkpoint directory exists before the training loop so the
+    # periodic save never races on a missing directory (D388). Guarded to a
+    # single rank to avoid concurrent mkdir.
+    if rank == 0:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
     # Create model and move to GPU
     model = model_class(**model_args)
     device = torch.device(f'cuda:{rank}')
@@ -102,6 +128,10 @@ def train_distributed(
         pin_memory=True
     )
     
+    # Validation loader is intentionally NOT sharded: the full validation set
+    # is evaluated on rank 0 only (replicated across ranks is avoided to keep
+    # the metrics identical to single-GPU training).  Training is sharded via
+    # train_sampler above.
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -169,32 +199,40 @@ def train_distributed(
         
         avg_train_loss = train_loss / train_batches
         
-        # Validation (only on rank 0)
+        # Validation (only on rank 0, on the unwrapped module)
         if rank == 0:
-            model.eval()
-            val_loss = 0
-            val_batches = 0
-            
+            eval_model = model.module if isinstance(model, DDP) else model
+            eval_model.eval()
+            val_sse = 0.0
+            val_n = 0
+
             with torch.no_grad():
                 for batch in val_loader:
                     batch = [b.to(device) if isinstance(b, torch.Tensor) else b for b in batch]
-                    
+
                     if len(batch) == 3:
                         user_ids, movie_ids, ratings = batch
-                        predictions = model(user_ids, movie_ids)
+                        predictions = eval_model(user_ids, movie_ids)
                     elif len(batch) == 4:
                         user_ids, movie_ids, features, ratings = batch
-                        predictions = model(user_ids, movie_ids, features)
+                        predictions = eval_model(user_ids, movie_ids, features)
                     else:
                         user_ids, movie_ids, features, embeddings, ratings = batch
-                        predictions = model(user_ids, movie_ids, features, embeddings)
-                    
+                        predictions = eval_model(user_ids, movie_ids, features, embeddings)
+
                     loss = criterion(predictions, ratings)
-                    val_loss += loss.item()
-                    val_batches += 1
-            
-            avg_val_loss = val_loss / val_batches
-            val_rmse = avg_val_loss ** 0.5
+                    # Weight each batch by its sample count so the aggregate
+                    # RMSE is a true weighted RMSE (not a mean of batch means).
+                    bsz = int(ratings.size(0))
+                    val_sse += loss.item() * bsz
+                    val_n += bsz
+
+            if val_n == 0:
+                avg_val_loss = 0.0
+                val_rmse = 0.0
+            else:
+                avg_val_loss = val_sse / val_n
+                val_rmse = avg_val_loss ** 0.5
             
             logger.info(
                 f"Epoch {epoch+1}/{epochs} - "
@@ -261,8 +299,7 @@ def main_distributed_training(
         logger.warning(f"Only {available_gpus} GPU(s) available. Using single GPU training.")
         # Fall back to single GPU training
         device = torch.device('cuda:0')
-        model = model_class(**model_args).to(device)
-        # ... single GPU training code ...
+        model_class(**model_args).to(device)  # single-GPU fallback; training loop not wired
         return
     
     logger.info(f"Starting distributed training on {num_gpus} GPUs")
@@ -302,7 +339,6 @@ if __name__ == '__main__':
     Option 3: Programmatically (as shown below)
     """
     
-    from training.advanced_models_v2 import AdvancedHybridRecommender
     from torch.utils.data import TensorDataset
     
     print("Distributed Training Setup")

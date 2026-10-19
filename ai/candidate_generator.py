@@ -16,9 +16,15 @@ import logging
 from tmdb.fetcher import TMDBFetcher
 from ai.cache_manager import cache_manager
 from database.db_manager import DatabaseManager
+from config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _movie_key(movie):
+    """Stable identifier for de-duplication across DB ('movie_id') and TMDB ('id') items."""
+    return movie.get('id') or movie.get('movie_id')
 
 
 class CandidateGenerator:
@@ -36,7 +42,7 @@ class CandidateGenerator:
         self.tmdb = tmdb_fetcher or TMDBFetcher()
         self.db = db_manager or DatabaseManager()
     
-    def generate_candidates(self, user_id=None, target_count=300, strategy='mixed'):
+    def generate_candidates(self, user_id=None, target_count=Config.CANDIDATE_COUNT, strategy=Config.CANDIDATE_STRATEGY):
         """
         Generate candidate movies for recommendation
         
@@ -51,34 +57,40 @@ class CandidateGenerator:
         candidates = []
         candidate_ids = set()
         
+        # Unknown strategies silently produced [] before; fall back explicitly.
+        valid_strategies = ('mixed', 'genre', 'popularity', 'exploration')
+        if strategy not in valid_strategies:
+            logger.warning(f"Unknown strategy '{strategy}', falling back to '{Config.CANDIDATE_STRATEGY}'")
+            strategy = Config.CANDIDATE_STRATEGY
+        
         logger.info(f"Generating {target_count} candidates using '{strategy}' strategy...")
         
         if strategy == 'mixed':
             # 40% genre-based
             genre_candidates = self._generate_by_genre(user_id, int(target_count * 0.4))
             candidates.extend(genre_candidates)
-            candidate_ids.update([m.get('id') for m in genre_candidates if m.get('id')])
+            candidate_ids.update([_movie_key(m) for m in genre_candidates if _movie_key(m)])
             
             # 30% popularity-based
             popular_candidates = self._generate_by_popularity(int(target_count * 0.3))
             for movie in popular_candidates:
-                if movie.get('id') not in candidate_ids:
+                if _movie_key(movie) not in candidate_ids:
                     candidates.append(movie)
-                    candidate_ids.add(movie.get('id'))
+                    candidate_ids.add(_movie_key(movie))
             
             # 20% exploration (random discovery)
             explore_candidates = self._generate_exploration(int(target_count * 0.2))
             for movie in explore_candidates:
-                if movie.get('id') not in candidate_ids:
+                if _movie_key(movie) not in candidate_ids:
                     candidates.append(movie)
-                    candidate_ids.add(movie.get('id'))
+                    candidate_ids.add(_movie_key(movie))
             
             # 10% from cache (fast access)
             cache_candidates = self._generate_from_cache(int(target_count * 0.1))
             for movie in cache_candidates:
-                if movie.get('id') not in candidate_ids:
+                if _movie_key(movie) not in candidate_ids:
                     candidates.append(movie)
-                    candidate_ids.add(movie.get('id'))
+                    candidate_ids.add(_movie_key(movie))
         
         elif strategy == 'genre':
             candidates = self._generate_by_genre(user_id, target_count)
@@ -150,7 +162,7 @@ class CandidateGenerator:
         Uses TMDB popular and top-rated endpoints
         """
         candidates = []
-        pages_needed = (count // 20) + 1  # 20 movies per page
+        pages_needed = (count // Config.MOVIES_PER_PAGE) + 1  # TMDB standard page size
         
         for page in range(1, min(pages_needed + 1, 6)):  # Max 5 pages
             try:
@@ -241,20 +253,27 @@ class CandidateGenerator:
     
     def _get_user_favorite_genres(self, user_id):
         """
-        Get user's favorite genres from interaction history
-        
+        Get user's favorite genres from interaction history.
+
+        Returns TMDB genre ids (not the internal DB ``genre_id``) so the values
+        are in the same namespace that ``_get_popular_genres`` and the TMDB
+        discover API expect.
+
         Returns:
-            list: Genre IDs sorted by preference
+            list: TMDB genre IDs sorted by preference
         """
         try:
-            # Query user's interacted movies (chosen_movie_id = pairwise winner)
+            # Query user's interacted movies (chosen_movie_id = pairwise winner).
+            # Map the internal genre_id to the TMDB genre id via genres.tmdb_genre_id.
             query = """
-            SELECT g.genre_id, COUNT(*) as interaction_count
+            SELECT g.tmdb_genre_id, COUNT(*) as interaction_count
             FROM user_interactions ui
             JOIN movie_genres mg ON ui.chosen_movie_id = mg.movie_id
             JOIN genres g ON mg.genre_id = g.genre_id
-            WHERE ui.user_id = %s AND ui.chosen_movie_id IS NOT NULL
-            GROUP BY g.genre_id
+            WHERE ui.user_id = %s
+              AND ui.chosen_movie_id IS NOT NULL
+              AND g.tmdb_genre_id IS NOT NULL
+            GROUP BY g.tmdb_genre_id
             ORDER BY interaction_count DESC
             LIMIT 5
             """
@@ -262,7 +281,7 @@ class CandidateGenerator:
             results = self.db.query(query, (user_id,))
             
             if results:
-                return [row['genre_id'] for row in results]
+                return [row['tmdb_genre_id'] for row in results]
             
         except Exception as e:
             logger.error(f"Error getting user genres: {e}")
@@ -294,7 +313,7 @@ class CandidateGenerator:
         random.shuffle(popular_genre_ids)
         return popular_genre_ids
     
-    def generate_pairwise_candidates(self, user_id=None, count=30):
+    def generate_pairwise_candidates(self, user_id=None, count=Config.PAIRWISE_BATCH_SIZE):
         """
         Generate candidates specifically for pairwise comparison
         
@@ -313,12 +332,16 @@ class CandidateGenerator:
         explore_movies = []
         
         if user_id:
-            # Get movies user has interacted with
+            # Get movies user has interacted with, enriched with full display
+            # metadata (poster/rating/year/genres) so the compare UI is complete.
             try:
                 query = """
-                SELECT m.movie_id, m.title, m.tmdb_id
-                FROM movies m
-                JOIN user_interactions ui ON m.movie_id = ui.chosen_movie_id
+                SELECT md.movie_id, md.tmdb_id, md.title, md.original_title,
+                       md.overview, md.release_year, md.runtime, md.poster_path,
+                       md.backdrop_path, md.tmdb_rating, md.vote_count,
+                       md.popularity, md.media_type, md.elo_score, md.genres
+                FROM user_interactions ui
+                JOIN movie_details md ON md.movie_id = ui.chosen_movie_id
                 WHERE ui.user_id = %s AND ui.chosen_movie_id IS NOT NULL
                 ORDER BY ui.timestamp DESC
                 LIMIT %s
@@ -342,6 +365,18 @@ class CandidateGenerator:
         # Generate exploration candidates (new movies)
         explore_movies = self._generate_exploration(count // 2)
         
+        # Known movies come from the DB (tmdb_id) and explore movies from TMDB
+        # (id); drop any explore candidate already present in the known half so
+        # the pair can never surface the same movie twice.
+        known_tmdb_ids = {
+            m.get('tmdb_id') for m in known_movies
+            if isinstance(m, dict) and m.get('tmdb_id')
+        }
+        explore_movies = [
+            m for m in explore_movies
+            if not (isinstance(m, dict) and m.get('id') in known_tmdb_ids)
+        ]
+        
         return {
             'known': known_movies[:count // 2],
             'explore': explore_movies[:count // 2]
@@ -362,7 +397,7 @@ if __name__ == "__main__":
     candidates = gen.generate_candidates(target_count=50, strategy='mixed')
     
     print(f"\nGenerated {len(candidates)} candidates")
-    print(f"Sample titles:")
+    print("Sample titles:")
     for movie in candidates[:5]:
         print(f"  - {movie.get('title', 'Unknown')} (ID: {movie.get('id')})")
     

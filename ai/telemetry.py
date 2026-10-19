@@ -10,10 +10,8 @@ Implements:
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import Any, Dict, List, Optional
-import numpy as np
 
 
 class LatencyHistogram:

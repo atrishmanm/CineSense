@@ -12,12 +12,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import numpy as np
 import logging
 from pathlib import Path
 from tqdm import tqdm
 import json
-from datetime import datetime
 
 from ai.data_preprocessor import DataPreprocessor, RecommenderDataset
 from ai.two_tower_ncf import TwoTowerNCF
@@ -115,8 +113,8 @@ class TrainingPipeline:
             try:
                 preprocessor.load_processed_data()
                 logger.info("✓ Loaded preprocessed data")
-            except:
-                logger.info("No preprocessed data found, running preprocessing...")
+            except Exception as e:
+                logger.warning(f"No preprocessed data found ({e}); running preprocessing...")
                 from ai.data_preprocessor import preprocess_pipeline
                 preprocessor = preprocess_pipeline(sample_size=sample_size)
         else:
@@ -168,7 +166,7 @@ class TrainingPipeline:
             pin_memory=True if torch.cuda.is_available() else False
         )
         
-        logger.info(f"✓ Data loaders created:")
+        logger.info("✓ Data loaders created:")
         logger.info(f"  Train: {len(train_dataset):,} samples")
         logger.info(f"  Validation: {len(val_dataset):,} samples")
         logger.info(f"  Test: {len(test_dataset):,} samples")
@@ -223,7 +221,7 @@ class TrainingPipeline:
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         
-        logger.info(f"✓ Model created:")
+        logger.info("✓ Model created:")
         logger.info(f"  Total parameters: {total_params:,}")
         logger.info(f"  Trainable parameters: {trainable_params:,}")
         

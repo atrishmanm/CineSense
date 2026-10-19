@@ -11,7 +11,6 @@ Architecture:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -162,7 +161,7 @@ class TwoTowerNCF(nn.Module):
     def __init__(self, num_users, num_movies, embedding_dim=128, hidden_dims=[256, 128, 64]):
         super().__init__()
         
-        logger.info(f"Initializing Two-Tower NCF model:")
+        logger.info("Initializing Two-Tower NCF model:")
         logger.info(f"  Users: {num_users:,}")
         logger.info(f"  Movies: {num_movies:,}")
         logger.info(f"  Embedding dim: {embedding_dim}")

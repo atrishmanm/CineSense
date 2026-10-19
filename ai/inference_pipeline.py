@@ -15,9 +15,7 @@ import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import pickle
 import logging
-from typing import List, Dict, Tuple
 from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO)
@@ -254,8 +252,9 @@ class ProductionRecommender:
         """Convert user ID to index"""
         try:
             return self.preprocessor.user_encoder.transform([user_id])[0]
-        except:
-            # Unknown user - return random
+        except Exception as e:
+            # Unknown user - fall back to index 0, but never silently.
+            logger.warning(f"Unknown user {user_id}; falling back to user index 0: {e}")
             return 0
     
     def _encode_movie_ids(self, movie_ids):
@@ -266,8 +265,9 @@ class ProductionRecommender:
             try:
                 idx = self.preprocessor.movie_encoder.transform([movie_id])[0]
                 encoded.append(idx)
-            except:
-                # Unknown movie - skip
+            except Exception as e:
+                # Unknown movie - skip (logged so dropped candidates are visible).
+                logger.debug(f"Skipping unknown movie {movie_id}: {e}")
                 continue
         
         return encoded
@@ -441,6 +441,9 @@ def load_production_model(model_path='ai/models/best_model.pt',
         device=device
     )
     
+    if recommender is None:
+        raise RuntimeError("Failed to construct ProductionRecommender")
+    
     return recommender
 
 
@@ -450,6 +453,8 @@ if __name__ == '__main__':
     
     try:
         recommender = load_production_model()
+        if recommender is None:
+            raise RuntimeError("load_production_model() returned None")
         
         # Test recommendation
         user_id = 1

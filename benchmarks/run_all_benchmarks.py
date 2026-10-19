@@ -232,13 +232,15 @@ def run_part_c(movies, splits, user_train_items) -> Dict[str, Dict[str, Any]]:
             cands = splits["catalog"] - user_train_items.get(uid, set())
             cache[uid] = rec.recommend(uid, K, cands)
 
-        # Warm latency
-        warm: list[float] = []
+        # Cache-hit latency: measures retrieving a precomputed recommendation
+        # from the in-memory cache (a dict lookup), NOT model inference.
+        # Named honestly so it is not mistaken for a warm inference path.
+        cache_hit: list[float] = []
         for i in range(LATENCY_REQUESTS):
             uid = sample_users[i % len(sample_users)]
             t0 = time.perf_counter()
             _ = cache.get(uid)
-            warm.append((time.perf_counter() - t0) * 1000)
+            cache_hit.append((time.perf_counter() - t0) * 1000)
 
         tracemalloc.start()
         for uid in sample_users[:10]:
@@ -247,17 +249,18 @@ def run_part_c(movies, splits, user_train_items) -> Dict[str, Dict[str, Any]]:
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-        ca, wa = np.asarray(cold), np.asarray(warm)
+        ca, wa = np.asarray(cold), np.asarray(cache_hit)
         results[rec.name] = {
             "cold_p50_ms": float(np.percentile(ca, 50)),
             "cold_p95_ms": float(np.percentile(ca, 95)),
             "cold_p99_ms": float(np.percentile(ca, 99)),
-            "warm_p50_ms": float(np.percentile(wa, 50)),
-            "warm_p95_ms": float(np.percentile(wa, 95)),
-            "warm_p99_ms": float(np.percentile(wa, 99)),
-            "speedup_factor": float(np.median(ca) / max(np.median(wa), 1e-6)),
+            "cache_hit_p50_ms": float(np.percentile(wa, 50)),
+            "cache_hit_p95_ms": float(np.percentile(wa, 95)),
+            "cache_hit_p99_ms": float(np.percentile(wa, 99)),
+            "cache_lookup_speedup_factor": float(np.median(ca) / max(np.median(wa), 1e-6)),
             "peak_memory_mb": round(peak / 1024 / 1024, 2),
             "n_requests": LATENCY_REQUESTS,
+            "warm_measurement": "cache lookup only (precomputed recs), not inference",
         }
 
     return results
@@ -410,7 +413,7 @@ def generate_report(
         w("\n")
 
         # -- A --
-        w("## A -- Recommendation Quality Across 4 Strategies\n\n")
+        w(f"## A -- Recommendation Quality Across {len(quality)} Strategies\n\n")
         w("| Strategy | " + " | ".join(mk) + " |\n")
         w("|---|" + "|".join(["---"] * len(mk)) + "|\n")
         for name, m in quality.items():
@@ -450,13 +453,16 @@ def generate_report(
 
         # -- C --
         w("## C -- Latency & Caching Profiling (1,000 Requests)\n\n")
+        w("> *Cache-hit* is an in-memory lookup of a precomputed recommendation "
+          "(dict get), not a warm model inference; the speedup compares cold "
+          "inference against that cache lookup.\n\n")
         w("| Strategy | Cold p50 ms | Cold p95 ms | Cold p99 ms "
-          "| Warm p50 ms | Warm p95 ms | Speedup | Peak MB |\n")
+          "| Cache-Hit p50 ms | Cache-Hit p95 ms | Lookup Speedup | Peak MB |\n")
         w("|---|---|---|---|---|---|---|---|\n")
         for name, m in latency.items():
             w(f"| {name} | {m['cold_p50_ms']:.2f} | {m['cold_p95_ms']:.2f} "
-              f"| {m['cold_p99_ms']:.2f} | {m['warm_p50_ms']:.4f} "
-              f"| {m['warm_p95_ms']:.4f} | {m['speedup_factor']:.0f}x "
+              f"| {m['cold_p99_ms']:.2f} | {m['cache_hit_p50_ms']:.4f} "
+              f"| {m['cache_hit_p95_ms']:.4f} | {m['cache_lookup_speedup_factor']:.0f}x "
               f"| {m['peak_memory_mb']:.2f} |\n")
         w("\n")
 
@@ -525,18 +531,31 @@ def generate_report(
         w("\n")
 
         # -- Resume --
-        w("---\n\n## Resume-Ready Portfolio Bullets\n\n```text\n")
-        n_eval = quality.get("Popularity", {}).get("n_eval_users", 906)
-        w(f"CineSense | Python, Flask, PyTorch, scikit-learn, MySQL, Redis\n")
-        w(f"* Evaluated 5 recommendation strategies on {n_eval} held-out users\n")
-        w(f"  from MovieLens-100K; hybrid scoring delivers 5.5x higher catalog coverage\n")
-        w(f"  (21.8% vs 4.0%) and higher novelty (4.46 bits) than popularity baselines.\n")
-        w(f"* Built and profiled a 2-stage retrieval pipeline: candidate recall reached\n")
-        w(f"  {two_stage.get('budgets', {}).get(300, {}).get('candidate_recall', 0.15):.1%} at 300 candidates with sub-15ms p95 latency.\n")
-        w(f"* Implemented MMR diversity reranking and traceable score explanations,\n")
-        w(f"  achieving 100% explanation coverage while mapping the relevance-diversity trade-off curve.\n")
-        w(f"* Benchmarked 1,000 requests with sliding-window LRU caching, cutting p95\n")
-        w(f"  latency from 13.4 ms to <0.01 ms with a 116,000x caching speedup.\n")
+        w("---\n\n## Resume-Ready Portfolio Bullets (values computed from this run)\n\n```text\n")
+        n_eval = quality.get("Popularity", {}).get("n_eval_users", 0)
+        n_strategies = len(quality)
+        pop_cov = quality.get("Popularity", {}).get("catalog_coverage", 0.0)
+        hybrid_key = next((k for k in quality if k.startswith("Hybrid(")), None)
+        if hybrid_key is None and quality:
+            hybrid_key = next(iter(quality))
+        hyb_cov = quality.get(hybrid_key, {}).get("catalog_coverage", 0.0) if hybrid_key else 0.0
+        hyb_nov = quality.get(hybrid_key, {}).get("novelty", 0.0) if hybrid_key else 0.0
+        cov_ratio = (hyb_cov / pop_cov) if pop_cov > 0 else 0.0
+        cand_recall_300 = two_stage.get("budgets", {}).get(300, {}).get("candidate_recall", 0.0)
+        rerank_p95_300 = two_stage.get("budgets", {}).get(300, {}).get("rerank_p95_ms", 0.0)
+        cold_p95_max = max((m["cold_p95_ms"] for m in latency.values()), default=0.0)
+        cache_p95_min = min((m["cache_hit_p95_ms"] for m in latency.values()), default=0.0)
+        max_lookup_speedup = max((m["cache_lookup_speedup_factor"] for m in latency.values()), default=0.0)
+        w("CineSense | Python, Flask, PyTorch, scikit-learn, MySQL, Redis\n")
+        w(f"* Evaluated {n_strategies} recommendation strategies on {n_eval} held-out users\n")
+        w(f"  from MovieLens-100K; hybrid scoring delivers {cov_ratio:.1f}x higher catalog coverage\n")
+        w(f"  ({hyb_cov:.1%} vs {pop_cov:.1%}) and higher novelty ({hyb_nov:.2f} bits) than popularity baselines.\n")
+        w("* Built and profiled a 2-stage retrieval pipeline: candidate recall reached\n")
+        w(f"  {cand_recall_300:.1%} at 300 candidates; Stage-2 rerank p95 = {rerank_p95_300:.2f} ms.\n")
+        w("* Implemented MMR diversity reranking and traceable score explanations,\n")
+        w(f"  achieving {diversity.get('lambda=0.0 (No Rerank)', {}).get('explanation_coverage', 1.0):.0%} explanation coverage while mapping the relevance-diversity trade-off curve.\n")
+        w("* Benchmarked 1,000 requests with sliding-window LRU caching: cold p95 up to\n")
+        w(f"  {cold_p95_max:.2f} ms vs {cache_p95_min:.4f} ms for a cache hit (max {max_lookup_speedup:,.0f}x lookup speedup; cache hit is a dict lookup, not inference).\n")
         w("```\n\n")
         w("> All metrics computed on held-out test data never seen during\n")
         w("> training. Results are fully reproducible with seed=42.\n")

@@ -1,6 +1,13 @@
 """
 Advanced loss functions for recommendation training
 Improves RMSE by focusing on hard examples and better weighting
+
+STATUS: EXPERIMENTAL / UNUSED (D369/D370/D402).  Nothing in the repository
+imports these classes — ``get_loss_function`` is only exercised by this
+module's own ``__main__`` demo.  The training scripts use ``nn.MSELoss``
+(see ``training/train.py``, ``training/advanced_training.py``).  The math is
+kept for reference but has two known issues, documented on the classes
+below; do not adopt ``FocalMSELoss`` / ``CombinedLoss`` without fixing them.
 """
 
 import torch
@@ -11,10 +18,17 @@ import torch.nn.functional as F
 class FocalMSELoss(nn.Module):
     """
     Focal MSE Loss - focuses training on hard examples
-    
+
     Traditional MSE treats all errors equally. Focal loss weights
     hard-to-predict examples more heavily, improving overall accuracy.
-    
+
+    .. warning:: EXPERIMENTAL / UNUSED (D369). With the default ``beta=4.0``
+       and rating-scale errors (MSE typically < 1) the ``mse ** beta`` term
+       collapses the loss toward 0, so it does not behave like an MSE. On a
+       0..1 normalized target it is effectively non-informative. Left
+       unchanged for reference; fix the exponent or drop this class before
+       any real use.
+
     Args:
         alpha: Modulating factor (default: 2.0)
         beta: Exponent for weighting (default: 4.0)
@@ -112,6 +126,13 @@ class CombinedLoss(nn.Module):
     """
     Combination of MSE, Focal, and Ranking losses
     Provides best overall performance
+
+    .. warning:: EXPERIMENTAL / UNUSED (D370). The three components live on
+       incompatible scales: ``nn.MSELoss`` is ~O(1), ``FocalMSELoss``
+       collapses toward 0 (see its warning), and ``RankingLoss`` is a hinge
+       in raw rating units. Summing them with fixed weights (1.0/0.5/0.3)
+       makes the objective dominated by the ranking hinge. Left unchanged
+       for reference; re-scale/renormalize before any real use.
     """
     
     def __init__(

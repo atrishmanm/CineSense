@@ -6,7 +6,6 @@ Requirements: pip install matplotlib
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import numpy as np
 
 
 def draw_er_diagram():

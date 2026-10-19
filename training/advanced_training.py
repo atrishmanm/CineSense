@@ -7,7 +7,7 @@ Achieves RMSE < 0.75 through:
 - Learning rate warmup
 """
 
-import os
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,6 +22,17 @@ from training.advanced_models import get_advanced_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+SEED = 42
+
+
+def set_seed(seed: int = SEED) -> None:
+    """Seed python/numpy/torch RNGs for reproducible training runs."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 class MovieLensDataset(Dataset):
@@ -186,6 +197,8 @@ def train_advanced_model(
     logger.info(f"TRAINING ADVANCED {model_type.upper()} MODEL")
     logger.info("Target RMSE: < 0.75 (Netflix-level)")
     logger.info("="*80)
+
+    set_seed(SEED)
     
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -209,7 +222,8 @@ def train_advanced_model(
     logger.info(f"Movies: {num_movies:,}")
     logger.info(f"Ratings: {len(df):,}")
     
-    # Time-based split
+    # Time-based split (global chronological; NOT per-user — a user may be
+    # absent from one side of the boundary).
     logger.info("\nCreating time-based train/validation split...")
     df = df.sort_values("timestamp")
     split_idx = int(len(df) * 0.8)
@@ -238,7 +252,8 @@ def train_advanced_model(
         batch_size=batch_size, 
         shuffle=True, 
         num_workers=4,
-        pin_memory=True if torch.cuda.is_available() else False
+        pin_memory=True if torch.cuda.is_available() else False,
+        generator=torch.Generator().manual_seed(SEED),
     )
     val_loader = DataLoader(
         val_dataset, 
@@ -263,8 +278,9 @@ def train_advanced_model(
     criterion = FocalLoss(alpha=0.25, gamma=2.0)
     
     # Learning rate scheduler with warmup
+    # NOTE: warmup epochs keep the LR constant (main_scheduler only steps after
+    # warmup); the unused-step LambdaLR that was here was removed as dead code.
     warmup_epochs = 2
-    warmup_scheduler = warmup_lr_scheduler(optimizer, len(train_loader) * warmup_epochs, learning_rate)
     
     main_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=3, verbose=True
@@ -296,8 +312,10 @@ def train_advanced_model(
         # Train
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device, use_content, scaler)
         
-        # Validate
-        val_loss, val_rmse, val_mae = validate(model, val_loader, nn.MSELoss(), device, use_content)
+        # Validate — use the SAME criterion as training (FocalLoss) so the
+        # logged val_loss is on the same scale as train_loss. RMSE/MAE are
+        # computed from raw predictions vs targets regardless of criterion.
+        val_loss, val_rmse, val_mae = validate(model, val_loader, criterion, device, use_content)
         
         # Update schedulers
         if epoch > warmup_epochs:

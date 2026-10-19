@@ -45,8 +45,8 @@ Calculates all relevant RecSys & ML metrics on real interaction data:
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from collections import Counter
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 import numpy as np
 
@@ -315,15 +315,28 @@ def gini_coefficient(all_recs: Dict[int, List[int]], catalog_size: int, k: int =
     Gini Index of recommendation distribution.
     0.0 = perfect equality (every movie recommended equally).
     1.0 = maximal inequality (only 1 movie ever recommended).
+
+    IDs outside ``[0, catalog_size)`` are *not* silently dropped: the
+    frequency vector is widened to cover the largest recommended id so
+    every recommendation is counted exactly once.
     """
     counts = Counter()
     for recs in all_recs.values():
         counts.update(recs[:k])
 
-    # All items including those with 0 recommendations
-    freqs = np.zeros(catalog_size, dtype=np.float64)
+    if not counts:
+        return 0.0
+
+    # All items including those with 0 recommendations.  Grow the vector if
+    # any recommended id falls outside the nominal catalog range instead of
+    # discarding those items.
+    max_id = max((iid for iid in counts if iid >= 0), default=-1)
+    size = max(catalog_size, max_id + 1)
+    if size <= 0:
+        return 0.0
+    freqs = np.zeros(size, dtype=np.float64)
     for item_id, count in counts.items():
-        if 0 <= item_id < catalog_size:
+        if item_id >= 0:
             freqs[item_id] = count
 
     if np.sum(freqs) == 0:

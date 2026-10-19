@@ -7,6 +7,7 @@ Supports two backends:
   - 'hybrid'  — Legacy HybridRecommender from training/models.py
 """
 
+import os
 import torch
 import numpy as np
 import pandas as pd
@@ -18,6 +19,40 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Directory holding the locally trained legacy checkpoints (gitignored *.pt).
+MODEL_DIR = Path(os.getenv("MODEL_DIR", "model"))
+
+
+def _require_file(path: Path, what: str) -> Path:
+    """Return *path* or raise with an actionable message (D387)."""
+    if not Path(path).exists():
+        raise FileNotFoundError(
+            f"{what} not found: {path}. Trained artifacts under "
+            f"'{MODEL_DIR}/' are gitignored and absent on a fresh clone; "
+            "download them or retrain (training/train.py), or set MODEL_DIR."
+        )
+    return Path(path)
+
+
+def _resolve_checkpoint(
+    explicit: str | None, env_var: str, default_name: str, what: str
+) -> Path | None:
+    """Locate a checkpoint by explicit path, env var, CWD, or repo root."""
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit))
+    env_val = os.getenv(env_var)
+    if env_val:
+        candidates.append(Path(env_val))
+    candidates.append(Path(default_name))
+    candidates.append(PROJECT_ROOT / default_name)
+    candidates.append(PROJECT_ROOT / "models" / default_name)
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return None
 
 
 class ProductionRecommender:
@@ -34,7 +69,8 @@ class ProductionRecommender:
         logger.info(f"Loading {model_type} recommender...")
         
         # Load mappings
-        with open("model/mappings.pkl", "rb") as f:
+        mappings_path = _require_file(MODEL_DIR / "mappings.pkl", "Mappings file")
+        with open(mappings_path, "rb") as f:
             mappings = pickle.load(f)
             self.user_encoder = mappings["user_encoder"]
             self.movie_encoder = mappings["movie_encoder"]
@@ -44,19 +80,23 @@ class ProductionRecommender:
         # Load plot embeddings if hybrid
         self.plot_embeddings = None
         if model_type == 'hybrid':
-            self.plot_embeddings = np.load("model/plot_embeddings.npy")
+            plot_path = _require_file(MODEL_DIR / "plot_embeddings.npy", "Plot embeddings")
+            self.plot_embeddings = np.load(plot_path)
             logger.info(f"Loaded plot embeddings: {self.plot_embeddings.shape}")
         
         # Load model
         self.model = get_model(model_type, self.num_users, self.num_movies, plot_emb_dim=768)
         
-        checkpoint = torch.load(f"model/{model_type}_recommender.pt", map_location=self.device)
+        checkpoint_path = _require_file(
+            MODEL_DIR / f"{model_type}_recommender.pt", f"{model_type.title()} checkpoint"
+        )
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model = self.model.to(self.device)
         self.model.eval()
         
         # Load movie metadata
-        self.movie_metadata = pd.read_csv("model/movie_metadata.csv")
+        self.movie_metadata = pd.read_csv(_require_file(MODEL_DIR / "movie_metadata.csv", "Movie metadata"))
         
         logger.info(f"✓ {model_type.upper()} recommender loaded and ready")
     
@@ -209,21 +249,49 @@ class EnsembleProductionRecommender:
     
     model_type = 'ensemble'
     
-    def __init__(self, v2_path='cinesense_v2.pt', v1_path='cinesense_model_final.pt'):
+    def __init__(self, v2_path=None, v1_path=None):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.scorer = EnsembleScorer(v2_path=v2_path, v1_path=v1_path, device=self.device)
+        
+        # Resolve the offline ensemble checkpoints (D381/D387). These are not
+        # bundled with the repo; locate them via explicit path, DL_V2_CHECKPOINT,
+        # CWD, the repo root, or models/.
+        resolved_v2 = _resolve_checkpoint(
+            v2_path, "DL_V2_CHECKPOINT", "cinesense_v2.pt", "Ensemble V2 checkpoint"
+        )
+        if resolved_v2 is None:
+            raise FileNotFoundError(
+                "Ensemble V2 checkpoint 'cinesense_v2.pt' not found. Set "
+                "DL_V2_CHECKPOINT to its path or place it in the repo root/models. "
+                "These offline checkpoints are not bundled in the repository."
+            )
+        resolved_v1 = _resolve_checkpoint(
+            v1_path, "DL_V1_CHECKPOINT", "cinesense_model_final.pt", "Ensemble V1 checkpoint"
+        )
+        if resolved_v1 is None:
+            # V1 is optional: EnsembleScorer falls back to V2-only when it is
+            # missing. Pass the (nonexistent) default so the existing warning fires.
+            resolved_v1 = Path("cinesense_model_final.pt")
+            logger.warning(
+                "Ensemble V1 checkpoint not found; scoring with V2 models only."
+            )
+        
+        self.scorer = EnsembleScorer(
+            v2_path=str(resolved_v2), v1_path=str(resolved_v1), device=self.device
+        )
         
         if not self.scorer.load():
-            raise RuntimeError("Failed to load ensemble checkpoints")
+            raise RuntimeError(
+                f"Failed to load ensemble checkpoints (V2={resolved_v2}, V1={resolved_v1})"
+            )
         
         self.num_users = self.scorer.stats['n_users']
         self.num_movies = self.scorer.stats['n_movies']
         
         # Load movie metadata if available
-        meta_path = Path('model/movie_metadata.csv')
+        meta_path = MODEL_DIR / 'movie_metadata.csv'
         self.movie_metadata = pd.read_csv(meta_path) if meta_path.exists() else None
         
-        logger.info(f"✅ EnsembleProductionRecommender ready | "
+        logger.info("✅ EnsembleProductionRecommender ready | "
                      f"{self.num_users} users, {self.num_movies} movies")
     
     def recommend(self, user_id, top_k=10, candidate_movies=None):

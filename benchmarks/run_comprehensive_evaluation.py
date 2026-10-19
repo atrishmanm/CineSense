@@ -1,6 +1,12 @@
 """
 CineSense End-to-End Comprehensive Evaluation Runner
 ====================================================
+
+Standalone CLI (`python -m benchmarks.run_comprehensive_evaluation`).  NOTE:
+this runner is not invoked by ``benchmarks/run_all_benchmarks.py`` (it is a
+separate, heavier MovieLens-100K report).  See ``benchmarks/metrics.py`` for
+the smaller metric set used by ``run_all_benchmarks`` (D398/D406).
+
 Evaluates on real MovieLens-100K data across:
 1. Regression metrics (RMSE, MAE, MSE, R², Explained Variance, Pearson r, Spearman rho, Max Error)
 2. Classification & Decision Support metrics (Accuracy, Precision, Recall, F1, Specificity, Balanced Acc, ROC-AUC, PR-AUC, MCC)
@@ -19,12 +25,11 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
 import numpy as np
 
@@ -101,19 +106,20 @@ class BiasedMatrixFactorization:
         self.q_i: Dict[int, np.ndarray] = {}
 
     def fit(self, train_ratings: List[Rating]):
-        np.random.seed(42)
+        # Local RNG (do not pollute the process-wide numpy RNG).
+        rng = np.random.RandomState(42)
         ratings = [r.rating for r in train_ratings]
         self.global_mean = float(np.mean(ratings)) if ratings else 3.53
 
-        users = set(r.user_id for r in train_ratings)
-        items = set(r.item_id for r in train_ratings)
+        users = sorted({r.user_id for r in train_ratings})
+        items = sorted({r.item_id for r in train_ratings})
 
         scale = 1.0 / math.sqrt(self.n_factors)
         for u in users:
-            self.p_u[u] = np.random.normal(0, scale, self.n_factors).astype(np.float32)
+            self.p_u[u] = rng.normal(0, scale, self.n_factors).astype(np.float32)
             self.b_u[u] = 0.0
         for i in items:
-            self.q_i[i] = np.random.normal(0, scale, self.n_factors).astype(np.float32)
+            self.q_i[i] = rng.normal(0, scale, self.n_factors).astype(np.float32)
             self.b_i[i] = 0.0
 
         for epoch in range(self.n_epochs):
@@ -140,7 +146,7 @@ class BiasedMatrixFactorization:
         return float(np.clip(pred, 1.0, 5.0))
 
     def rank_items(self, user_id: int, candidates: Set[int], k: int) -> List[int]:
-        cand_list = list(candidates)
+        cand_list = sorted(candidates)  # deterministic order for ties/fallback
         if not cand_list:
             return []
         bu = self.b_u.get(user_id, 0.0)
@@ -198,7 +204,7 @@ class ContentRecommender:
         return float(np.clip(pred, 1.0, 5.0))
 
     def rank_items(self, user_id: int, candidates: Set[int], k: int) -> List[int]:
-        valid_cands = [i for i in candidates if i in self.movies]
+        valid_cands = sorted(i for i in candidates if i in self.movies)
         if not valid_cands:
             return []
         u_vec = self.user_profiles.get(user_id)
@@ -237,7 +243,7 @@ class CineSenseMultiStageProductionRanker:
 
     def rank_items(self, user_id: int, candidates: Set[int], k: int) -> List[int]:
         # Stage 1: Vectorized candidate scoring for top 50 funnel retrieval
-        cand_list = [i for i in candidates if i in self.movies]
+        cand_list = sorted(i for i in candidates if i in self.movies)
         if not cand_list:
             return []
 
@@ -470,10 +476,13 @@ def run_comprehensive_evaluation():
     print(f"  [OK] Saved all metrics JSON -> {json_path}")
 
     # Generate Markdown Report
+    n_ratings = len(ratings)
+    n_users = len({r.user_id for r in ratings})
+    n_movies = len(movies)
     report_path = results_dir / "comprehensive_evaluation_report.md"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("# CineSense Comprehensive End-to-End Metrics Benchmark Report\n\n")
-        f.write("> **Dataset:** MovieLens-100K (Real User Interactions, 100,000 ratings, 943 users, 1,682 movies)\n")
+        f.write(f"> **Dataset:** MovieLens-100K (Real User Interactions, {n_ratings:,} ratings, {n_users:,} users, {n_movies:,} movies)\n")
         f.write("> **Protocol:** Per-user chronological split (80% Train, 10% Validation, 10% Held-Out Test)\n")
         f.write("> **Relevance Threshold:** Rating >= 4.0 stars (Positive interaction / User Liked)\n\n")
 

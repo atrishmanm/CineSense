@@ -6,10 +6,8 @@ Merges MovieLens + TMDB and prepares data for deep learning
 import pandas as pd
 import numpy as np
 import torch
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import pickle
-import os
 from pathlib import Path
 import logging
 from tqdm import tqdm
@@ -144,7 +142,7 @@ class DataPreprocessor:
         )
         
         logger.info(f"Rating stats: mean={self.rating_mean:.2f}, std={self.rating_std:.2f}")
-        logger.info(f"Normalized to range [0, 1]")
+        logger.info("Normalized to range [0, 1]")
         
         return self
     

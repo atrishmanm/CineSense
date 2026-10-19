@@ -5,8 +5,14 @@ services:
     runtime: python
     plan: free  # Explicitly use free plan
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn "app_integrated:create_app()" --workers 2 --timeout 120
+    # Single worker (not 2): app_integrated.create_app() builds the ~10k-movie
+    # semantic index and loads CLIP/transformers. Two workers would duplicate
+    # that memory and double cold-start time. Prefer 1 worker + threads.
+    startCommand: gunicorn "app_integrated:create_app()" --workers 1 --threads 4 --timeout 120
     envVars:
+      # Keep 3.11.0 in sync with runtime.txt (python-3.11.0).
+      # torch / sentence-transformers / faiss wheels must be re-verified for
+      # any Python-version change before bumping this.
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: SECRET_KEY

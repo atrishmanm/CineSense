@@ -21,14 +21,9 @@ from benchmarks.metrics import (
     catalog_coverage,
     mean_self_information,
     intra_list_diversity,
-    evaluate_all,
 )
 from benchmarks.recommenders import (
-    BaseRecommender,
     PopularityRecommender,
-    ContentRecommender,
-    PreferenceEloRecommender,
-    HybridRecommender,
 )
 from ai.cache_manager import SlidingWindowCache
 

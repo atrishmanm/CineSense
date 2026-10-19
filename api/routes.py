@@ -5,6 +5,7 @@ RESTful API endpoints for the CineSense application
 
 from flask import Blueprint, request, jsonify, session, current_app
 import csv
+import re
 from pathlib import Path
 from database.db_manager import db
 from config import Config
@@ -20,6 +21,77 @@ api = Blueprint('api', __name__, url_prefix='/api')
 
 TMDB_GENRE_CACHE = {}
 TMDB_CSV_PATH = Path(__file__).resolve().parent.parent / 'data' / 'tmdb' / 'TMDB_movie_dataset_v11.csv'
+
+# ---- Input validation limits / whitelists ----------------------------------
+DEFAULT_LIMIT = 20
+MAX_LIMIT = 100                       # hard cap for client-supplied limit params
+PROFILE_INTERACTION_LIMIT = 5000      # interactions scanned when building taste profile
+PREFERENCES_INTERACTION_LIMIT = 1000  # interactions scanned for preference analysis
+HISTORY_INTERACTION_LIMIT = 1000      # interactions scanned for the activity timeline
+COMPARED_MOVIES_LIMIT = 5000          # interactions scanned for compared-movies list
+MAX_MOVIE_ID_CHUNK = 500              # max ids per IN(...) batch query
+
+VALID_ORDER_BY = {'elo_score', 'tmdb_rating', 'popularity'}
+VALID_MEDIA_TYPES = {'all', 'movie', 'tv'}
+VALID_STRATEGIES = {'mixed', 'genre', 'popularity', 'exploration'}
+VALID_SEARCH_TYPES = {'title', 'storyline', 'semantic', 'hybrid'}
+VALID_WATCHLIST_STATUSES = {'planned', 'watching', 'completed', 'dropped'}
+
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _json_body():
+    """Parse a JSON request body, returning {} when the body is absent or invalid."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _parse_limit(value, default=DEFAULT_LIMIT, maximum=MAX_LIMIT):
+    """Coerce a client-supplied limit into 1..maximum. Raises ValueError on bad input."""
+    if value is None or value == '':
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError('limit must be an integer')
+    if parsed < 1:
+        raise ValueError('limit must be a positive integer')
+    return min(parsed, maximum)
+
+
+def _parse_offset(value, default=0):
+    """Coerce a client-supplied offset into >= 0. Raises ValueError on bad input."""
+    if value is None or value == '':
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError('offset must be an integer')
+    if parsed < 0:
+        raise ValueError('offset must be a non-negative integer')
+    return parsed
+
+
+def _is_valid_email(email):
+    return bool(email) and bool(EMAIL_RE.match(email))
+
+
+def _fetch_movies_by_ids(movie_ids):
+    """Batch-fetch movie rows by id, avoiding an N+1 query per interaction."""
+    unique_ids = [mid for mid in dict.fromkeys(movie_ids) if mid]
+    if not unique_ids:
+        return {}
+    movies = {}
+    for start in range(0, len(unique_ids), MAX_MOVIE_ID_CHUNK):
+        chunk = unique_ids[start:start + MAX_MOVIE_ID_CHUNK]
+        placeholders = ','.join(['%s'] * len(chunk))
+        rows = db.query(
+            f"SELECT * FROM movie_details WHERE movie_id IN ({placeholders})",
+            tuple(chunk)
+        ) or []
+        for row in rows:
+            movies[row['movie_id']] = row
+    return movies
 
 
 def get_semantic_search():
@@ -74,6 +146,10 @@ def _ensure_movie_genres(movie, movie_id):
 
     if genres:
         for name in genres:
+            # Never persist blank genre names (TMDB id-only parses produce '')
+            if not name or not str(name).strip():
+                continue
+            name = str(name).strip()
             existing_genre = db.get_genre_by_name(name)
             if existing_genre:
                 genre_id = existing_genre['genre_id']
@@ -101,36 +177,49 @@ def _prime_tmdb_genres_cache(movies):
 def signup():
     """Create a new user account"""
     try:
-        data = request.get_json()
-        
-        username = data.get('username')
-        email = data.get('email')
-        password = data.get('password')
-        
+        data = _json_body()
+
+        username = (data.get('username') or '').strip()
+        email = (data.get('email') or '').strip()
+        password = data.get('password') or ''
+
         if not all([username, email, password]):
             return jsonify({'error': 'Missing required fields'}), 400
-        
-        # Check if user exists
-        existing_user = db.get_user_by_username(username)
-        if existing_user:
+
+        if len(username) < 3:
+            return jsonify({'error': 'Username must be at least 3 characters'}), 400
+
+        if not _is_valid_email(email):
+            return jsonify({'error': 'Invalid email address'}), 400
+
+        # Pre-check duplicates so we return 409 instead of a UNIQUE violation 500
+        if db.get_user_by_username(username):
             return jsonify({'error': 'Username already exists'}), 409
-        
+
+        existing_email = db.query(
+            "SELECT user_id FROM users WHERE email = %s",
+            (email,),
+            fetch_all=False
+        )
+        if existing_email:
+            return jsonify({'error': 'Email already exists'}), 409
+
         # Hash password
         password_hash = generate_password_hash(password)
-        
+
         # Create user
         user_id = db.create_user(username, email, password_hash)
-        
+
         # Set session
         session['user_id'] = user_id
         session['username'] = username
-        
+
         return jsonify({
             'message': 'User created successfully',
             'user_id': user_id,
             'username': username
         }), 201
-        
+
     except Exception as e:
         logger.error(f"Signup error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
@@ -140,11 +229,11 @@ def signup():
 def login():
     """User login"""
     try:
-        data = request.get_json()
-        
-        username = data.get('username')
-        password = data.get('password')
-        
+        data = _json_body()
+
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+
         if not all([username, password]):
             return jsonify({'error': 'Missing credentials'}), 400
         
@@ -189,7 +278,7 @@ def get_profile():
         stats = db.get_user_stats(user_id)
 
         # Fallback: compute stats from interactions if view is missing or stale
-        interactions = db.get_user_interactions(user_id, limit=5000)
+        interactions = db.get_user_interactions(user_id, limit=PROFILE_INTERACTION_LIMIT)
         total_comparisons = len(interactions)
         unique_movie_ids = set()
         for interaction in interactions:
@@ -235,7 +324,7 @@ def get_user_preferences():
             return jsonify({'error': 'Not authenticated'}), 401
         
         # Get user interactions
-        interactions = db.get_user_interactions(user_id, limit=1000)
+        interactions = db.get_user_interactions(user_id, limit=PREFERENCES_INTERACTION_LIMIT)
         
         if not interactions or len(interactions) == 0:
             return jsonify({
@@ -256,11 +345,15 @@ def get_user_preferences():
         genre_movie_ids = set()
         ratings = []
         years = []
-        
+
+        # Batch-fetch the movies we need instead of one query per interaction (N+1)
+        chosen_ids = [i.get('chosen_movie_id') for i in interactions if i.get('chosen_movie_id')]
+        movies_by_id = _fetch_movies_by_ids(chosen_ids)
+
         for interaction in interactions:
             chosen_id = interaction.get('chosen_movie_id')
             if chosen_id:
-                movie = db.get_movie_by_id(chosen_id)
+                movie = movies_by_id.get(chosen_id)
                 if movie:
                     chosen_movies.append(movie)
                     genre_movie_ids.add(chosen_id)
@@ -298,11 +391,8 @@ def get_user_preferences():
                 genre_counts[genre] = genre_counts.get(genre, 0) + 1
 
         if not genre_counts and genre_movie_ids:
-            genre_movies = []
-            for movie_id in genre_movie_ids:
-                movie = db.get_movie_by_id(movie_id)
-                if movie:
-                    genre_movies.append(movie)
+            genre_movies_by_id = _fetch_movies_by_ids(genre_movie_ids)
+            genre_movies = list(genre_movies_by_id.values())
 
             _prime_tmdb_genres_cache(genre_movies)
 
@@ -369,7 +459,7 @@ def get_user_interactions_api():
             return jsonify({'error': 'Not authenticated'}), 401
         
         # Get interactions
-        interactions = db.get_user_interactions(user_id, limit=1000)
+        interactions = db.get_user_interactions(user_id, limit=HISTORY_INTERACTION_LIMIT)
         
         # Build activity timeline (last 30 days)
         from collections import defaultdict
@@ -420,7 +510,7 @@ def get_compared_movies():
             return jsonify({'movies': []}), 200
         
         # Get all interactions to find compared movies
-        interactions = db.get_user_interactions(user_id, limit=10000)
+        interactions = db.get_user_interactions(user_id, limit=COMPARED_MOVIES_LIMIT)
         
         # Collect unique movie IDs from interactions
         compared_ids = set()
@@ -432,12 +522,9 @@ def get_compared_movies():
         
         include_genres = request.args.get('include_genres', '0').lower() in {'1', 'true', 'yes'}
 
-        # Get movie details
-        movies = []
-        for movie_id in compared_ids:
-            movie = db.get_movie_by_id(movie_id)
-            if movie:
-                movies.append(movie)
+        # Get movie details in a single batched query (N+1 avoidance)
+        movies_by_id = _fetch_movies_by_ids(compared_ids)
+        movies = list(movies_by_id.values())
 
         if include_genres and movies:
             _prime_tmdb_genres_cache(movies)
@@ -450,7 +537,7 @@ def get_compared_movies():
         
     except Exception as e:
         logger.error(f"Compared movies error: {e}")
-        return jsonify({'movies': []}), 200
+        return jsonify({'error': 'Failed to get compared movies'}), 500
 
 
 # ============================================================================
@@ -462,17 +549,21 @@ def get_recommendations():
     """Get personalized movie recommendations"""
     try:
         user_id = session.get('user_id')
-        
+
+        try:
+            limit = _parse_limit(request.args.get('limit'), default=20)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
         if not user_id:
             # Guest user: return popular movies
-            movies = db.get_top_movies(limit=20, order_by='popularity')
+            movies = db.get_top_movies(limit=limit, order_by='popularity')
             return jsonify({
                 'movies': movies,
                 'personalized': False
             }), 200
         
         # Get personalized recommendations
-        limit = request.args.get('limit', 20, type=int)
         recommendations = recommender.get_recommendations(user_id, n=limit)
         
         return jsonify({
@@ -581,9 +672,15 @@ def get_recommendations_lazy():
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
         
-        limit = request.args.get('limit', 20, type=int)
+        try:
+            limit = _parse_limit(request.args.get('limit'), default=20)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         strategy = request.args.get('strategy', 'mixed')  # mixed, genre, popularity, exploration
-        
+
+        if strategy not in VALID_STRATEGIES:
+            return jsonify({'error': f'Invalid strategy. Allowed: {sorted(VALID_STRATEGIES)}'}), 400
+
         logger.info(f"Getting lazy recommendations for user_id: {user_id}, limit: {limit}, strategy: {strategy}")
         
         recommendations = recommender.get_recommendations_lazy(
@@ -619,7 +716,7 @@ def submit_feedback():
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
         
-        data = request.get_json()
+        data = _json_body()
         
         movie1_id = data.get('movie1_id')
         movie2_id = data.get('movie2_id')
@@ -689,7 +786,10 @@ def get_movie_detail(movie_id):
 def get_similar_movies(movie_id):
     """Get movies similar to a given movie using genre overlap and AI embeddings"""
     try:
-        limit = request.args.get('limit', 12, type=int)
+        try:
+            limit = _parse_limit(request.args.get('limit'), default=12)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         movie = db.get_movie_by_id(movie_id)
         if not movie:
             return jsonify({'error': 'Movie not found'}), 404
@@ -731,11 +831,20 @@ def get_similar_movies(movie_id):
 def get_movies_by_genre():
     """Get movies filtered by genre and media type"""
     try:
-        genre = request.args.get('genre', '')
+        genre = (request.args.get('genre', '') or '').strip()
         media_type = request.args.get('media_type', 'all')
-        limit = request.args.get('limit', 20, type=int)
-        offset = request.args.get('offset', 0, type=int)
-        
+        try:
+            limit = _parse_limit(request.args.get('limit'), default=20)
+            offset = _parse_offset(request.args.get('offset'), default=0)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        if media_type not in VALID_MEDIA_TYPES:
+            return jsonify({'error': f'Invalid media_type. Allowed: {sorted(VALID_MEDIA_TYPES)}'}), 400
+
+        if len(genre) > 100:
+            return jsonify({'error': 'genre is too long'}), 400
+
         logger.info(f"Getting movies by genre: {genre}, media_type: {media_type}, offset: {offset}")
         
         # If no genre specified, get all movies
@@ -775,8 +884,14 @@ def get_watchlist():
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
     status_filter = request.args.get('status')
-    items = db.get_user_watchlist(user_id, status=status_filter)
-    return jsonify({'watchlist': items, 'count': len(items)}), 200
+    if status_filter and status_filter not in VALID_WATCHLIST_STATUSES:
+        return jsonify({'error': f'Invalid status. Allowed: {sorted(VALID_WATCHLIST_STATUSES)}'}), 400
+    try:
+        items = db.get_user_watchlist(user_id, status=status_filter)
+        return jsonify({'watchlist': items, 'count': len(items)}), 200
+    except Exception as e:
+        logger.error(f"Watchlist fetch error: {e}")
+        return jsonify({'error': 'Failed to fetch watchlist'}), 500
 
 @api.route('/watchlist', methods=['POST'])
 def add_to_watchlist():
@@ -784,16 +899,32 @@ def add_to_watchlist():
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
-    data = request.get_json()
+    data = _json_body()
     movie_id = data.get('movie_id')
     if not movie_id:
         return jsonify({'error': 'movie_id required'}), 400
+
+    status = data.get('status', 'planned')
+    if status not in VALID_WATCHLIST_STATUSES:
+        return jsonify({'error': f'Invalid status. Allowed: {sorted(VALID_WATCHLIST_STATUSES)}'}), 400
+
     try:
-        db.add_to_watchlist(user_id, movie_id, data.get('priority', 5), data.get('status', 'planned'), data.get('note'))
+        priority = int(data.get('priority', 5))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'priority must be an integer between 1 and 10'}), 400
+    if not 1 <= priority <= 10:
+        return jsonify({'error': 'priority must be between 1 and 10'}), 400
+
+    note = data.get('note')
+    if note is not None and len(str(note)) > 500:
+        return jsonify({'error': 'note must be at most 500 characters'}), 400
+
+    try:
+        db.add_to_watchlist(user_id, movie_id, priority, status, note)
         return jsonify({'success': True, 'message': 'Added to watchlist'}), 201
     except Exception as e:
         logger.error(f"Watchlist add error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to add to watchlist'}), 500
 
 @api.route('/watchlist/<int:movie_id>', methods=['PUT'])
 def update_watchlist(movie_id):
@@ -801,12 +932,35 @@ def update_watchlist(movie_id):
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
-    data = request.get_json()
+    data = _json_body()
     status = data.get('status')
     if not status:
         return jsonify({'error': 'status required'}), 400
-    rows = db.update_watchlist_status(user_id, movie_id, status, data.get('rating'))
-    return jsonify({'success': rows > 0}), 200
+    if status not in VALID_WATCHLIST_STATUSES:
+        return jsonify({'error': f'Invalid status. Allowed: {sorted(VALID_WATCHLIST_STATUSES)}'}), 400
+
+    rating = data.get('rating')
+    if rating is not None:
+        try:
+            rating = float(rating)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'rating must be a number between 0 and 10'}), 400
+        if not 0 <= rating <= 10:
+            return jsonify({'error': 'rating must be between 0 and 10'}), 400
+
+    try:
+        existing = db.query(
+            "SELECT watchlist_id FROM watchlist WHERE user_id = %s AND movie_id = %s",
+            (user_id, movie_id),
+            fetch_all=False
+        )
+        if not existing:
+            return jsonify({'error': 'Watchlist entry not found'}), 404
+        db.update_watchlist_status(user_id, movie_id, status, rating)
+    except Exception as e:
+        logger.error(f"Watchlist update error: {e}")
+        return jsonify({'error': 'Failed to update watchlist'}), 500
+    return jsonify({'success': True}), 200
 
 @api.route('/watchlist/<int:movie_id>', methods=['DELETE'])
 def remove_from_watchlist(movie_id):
@@ -814,8 +968,14 @@ def remove_from_watchlist(movie_id):
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
-    rows = db.remove_from_watchlist(user_id, movie_id)
-    return jsonify({'success': rows > 0}), 200
+    try:
+        rows = db.remove_from_watchlist(user_id, movie_id)
+    except Exception as e:
+        logger.error(f"Watchlist delete error: {e}")
+        return jsonify({'error': 'Failed to remove from watchlist'}), 500
+    if rows <= 0:
+        return jsonify({'error': 'Watchlist entry not found'}), 404
+    return jsonify({'success': True}), 200
 
 
 # ============================================================================
@@ -825,8 +985,12 @@ def remove_from_watchlist(movie_id):
 @api.route('/reviews/<int:movie_id>', methods=['GET'])
 def get_reviews(movie_id):
     """Get reviews for a movie"""
-    reviews = db.get_movie_reviews(movie_id)
-    return jsonify({'reviews': reviews, 'count': len(reviews)}), 200
+    try:
+        reviews = db.get_movie_reviews(movie_id)
+        return jsonify({'reviews': reviews, 'count': len(reviews)}), 200
+    except Exception as e:
+        logger.error(f"Reviews fetch error: {e}")
+        return jsonify({'error': 'Failed to fetch reviews'}), 500
 
 @api.route('/reviews', methods=['POST'])
 def add_review():
@@ -834,22 +998,36 @@ def add_review():
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
-    data = request.get_json()
+    data = _json_body()
     movie_id = data.get('movie_id')
     rating = data.get('rating')
     if not movie_id or rating is None:
         return jsonify({'error': 'movie_id and rating required'}), 400
     try:
+        rating = float(rating)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'rating must be a number between 1 and 10'}), 400
+    if not 1 <= rating <= 10:
+        return jsonify({'error': 'rating must be between 1 and 10'}), 400
+    try:
         db.add_review(user_id, movie_id, rating, data.get('review_text'), data.get('is_spoiler', False))
         return jsonify({'success': True, 'message': 'Review added'}), 201
     except Exception as e:
         logger.error(f"Review add error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to add review'}), 500
 
 @api.route('/reviews/<int:review_id>/helpful', methods=['POST'])
 def vote_helpful(review_id):
-    """Vote a review as helpful"""
-    db.vote_review_helpful(review_id)
+    """Vote a review as helpful (login required to prevent anonymous inflation)"""
+    if not session.get('user_id'):
+        return jsonify({'error': 'Login required'}), 401
+    try:
+        rows = db.vote_review_helpful(review_id)
+    except Exception as e:
+        logger.error(f"Helpful vote error: {e}")
+        return jsonify({'error': 'Failed to record vote'}), 500
+    if rows <= 0:
+        return jsonify({'error': 'Review not found'}), 404
     return jsonify({'success': True}), 200
 
 
@@ -860,14 +1038,22 @@ def vote_helpful(review_id):
 @api.route('/analytics/genre-stats', methods=['GET'])
 def genre_stats():
     """Genre comparison statistics using the genre_comparison_stats view"""
-    stats = db.get_genre_comparison_stats()
-    return jsonify({'stats': stats}), 200
+    try:
+        stats = db.get_genre_comparison_stats()
+        return jsonify({'stats': stats}), 200
+    except Exception as e:
+        logger.error(f"Genre stats error: {e}")
+        return jsonify({'error': 'Failed to fetch genre stats'}), 500
 
 @api.route('/analytics/genre-audit', methods=['GET'])
 def genre_audit():
     """Genre audit report using cursor-based stored procedure"""
-    report = db.run_genre_audit()
-    return jsonify({'report': report}), 200
+    try:
+        report = db.run_genre_audit()
+        return jsonify({'report': report}), 200
+    except Exception as e:
+        logger.error(f"Genre audit error: {e}")
+        return jsonify({'error': 'Failed to run genre audit'}), 500
 
 @api.route('/analytics/user-profile', methods=['GET'])
 def user_profile_analytics():
@@ -875,22 +1061,30 @@ def user_profile_analytics():
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
-    profile = db.get_user_taste_profile(user_id)
-    review_summary = db.get_user_review_summary(user_id)
-    advanced_stats = db.get_advanced_user_stats(user_id)
-    return jsonify({
-        'taste_profile': profile,
-        'review_summary': review_summary,
-        'stats': advanced_stats
-    }), 200
+    try:
+        profile = db.get_user_taste_profile(user_id)
+        review_summary = db.get_user_review_summary(user_id)
+        advanced_stats = db.get_advanced_user_stats(user_id)
+        return jsonify({
+            'taste_profile': profile,
+            'review_summary': review_summary,
+            'stats': advanced_stats
+        }), 200
+    except Exception as e:
+        logger.error(f"User profile analytics error: {e}")
+        return jsonify({'error': 'Failed to fetch analytics'}), 500
 
 @api.route('/analytics/movie-score/<int:movie_id>', methods=['GET'])
 def movie_score(movie_id):
     """Get weighted recommendation score for a movie"""
     user_id = session.get('user_id')
-    tier = db.get_movie_popularity_tier(movie_id)
-    score = db.get_weighted_score(user_id, movie_id) if user_id else None
-    return jsonify({'tier': tier, 'weighted_score': score}), 200
+    try:
+        tier = db.get_movie_popularity_tier(movie_id)
+        score = db.get_weighted_score(user_id, movie_id) if user_id else None
+        return jsonify({'tier': tier, 'weighted_score': score}), 200
+    except Exception as e:
+        logger.error(f"Movie score error: {e}")
+        return jsonify({'error': 'Failed to compute movie score'}), 500
 
 
 @api.route('/search/ai', methods=['POST'])
@@ -900,14 +1094,22 @@ def ai_search():
     Supports story/content-based search (e.g., "mars movie" finds "The Martian")
     """
     try:
-        data = request.get_json()
-        query = data.get('query', '').strip()
+        data = _json_body()
+        query = (data.get('query') or '').strip()
         
         if not query:
             return jsonify({'error': 'Query required'}), 400
-        
-        limit = data.get('limit', 20)
+
+        try:
+            limit = _parse_limit(data.get('limit'), default=20)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
         include_tv = data.get('include_tv', True)
+        if isinstance(include_tv, str):
+            include_tv = include_tv.strip().lower() not in {'0', 'false', 'no', 'off'}
+        else:
+            include_tv = bool(include_tv)
         
         logger.info(f"AI search query: {query}, limit: {limit}")
         
@@ -1070,13 +1272,19 @@ def search_movies():
     4. Return comprehensive results
     """
     try:
-        query = request.args.get('q', '')
-        limit = request.args.get('limit', 50, type=int)
+        query = (request.args.get('q', '') or '').strip()
+        try:
+            limit = _parse_limit(request.args.get('limit'), default=50)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         search_type = request.args.get('type', 'hybrid')  # title, storyline, semantic, hybrid
         user_id = session.get('user_id')
         
         if not query:
             return jsonify({'error': 'Search query required'}), 400
+
+        if search_type not in VALID_SEARCH_TYPES:
+            return jsonify({'error': f'Invalid search type. Allowed: {sorted(VALID_SEARCH_TYPES)}'}), 400
         
         logger.info(f"🔍 Searching: '{query}' (type: {search_type})")
         
@@ -1086,7 +1294,7 @@ def search_movies():
             try:
                 semantic_search = get_semantic_search()
                 if semantic_search:
-                    logger.info(f"🧠 Using semantic search...")
+                    logger.info("🧠 Using semantic search...")
                     if search_type == 'hybrid':
                         semantic_results = semantic_search.hybrid_search(query, top_k=limit)
                     else:
@@ -1112,9 +1320,6 @@ def search_movies():
         
         # Step 3: Merge results (semantic + database)
         if semantic_results:
-            # Create lookup for database results
-            db_movie_ids = {m['movie_id'] for m in db_movies}
-            
             # Merge: prefer semantic results, add db results that aren't in semantic
             merged_movies = semantic_results.copy()
             
@@ -1125,23 +1330,9 @@ def search_movies():
             db_movies = merged_movies[:limit]
             logger.info(f"🔄 Merged results: {len(db_movies)} movies")
         
-        # Step 4: If insufficient results, fetch from TMDB
-        if len(db_movies) < 5:
-            logger.info(f"📡 Fetching from TMDB to supplement results...")
-            from ai.content_pipeline import pipeline
-            try:
-                tmdb_movies = pipeline.fetch_on_demand(search_query=query)
-                if tmdb_movies:
-                    logger.info(f"✅ TMDB returned {len(tmdb_movies)} movies")
-                    # Re-search database with new content
-                    db_movies = db.search_movies_advanced(
-                        search_query=query,
-                        search_type='storyline',
-                        user_id=user_id,
-                        limit=limit
-                    )
-            except Exception as e:
-                logger.error(f"⚠️ TMDB fetch failed: {e}")
+        # NOTE: This is a read-only GET. Content ingestion from TMDB is intentionally
+        # not performed here (it is handled by the background content pipeline) so a
+        # GET never writes to the database.
         
         logger.info(f"📊 Final result: {len(db_movies)} movies")
         
@@ -1150,7 +1341,7 @@ def search_movies():
             'search_type': search_type,
             'movies': db_movies,
             'count': len(db_movies),
-            'source': 'semantic+database+tmdb' if semantic_results else 'database+tmdb',
+            'source': 'semantic+database' if semantic_results else 'database',
             'supports_storyline': True,
             'supports_semantic': True,
             'success': True
@@ -1169,71 +1360,31 @@ def search_movies():
 
 @api.route('/movie/top-rated', methods=['GET'])
 def get_top_rated():
-    """Get top-rated movies with pagination support - fetches from TMDB on-demand"""
+    """Get top-rated movies with pagination support"""
     try:
-        limit = request.args.get('limit', 20, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        try:
+            limit = _parse_limit(request.args.get('limit'), default=20)
+            offset = _parse_offset(request.args.get('offset'), default=0)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         order_by = request.args.get('order_by', 'elo_score')
         media_type = request.args.get('media_type', 'all')
-        
-        # First, try to get movies from database
+
+        if order_by not in VALID_ORDER_BY:
+            return jsonify({'error': f'Invalid order_by. Allowed: {sorted(VALID_ORDER_BY)}'}), 400
+        if media_type not in VALID_MEDIA_TYPES:
+            return jsonify({'error': f'Invalid media_type. Allowed: {sorted(VALID_MEDIA_TYPES)}'}), 400
+
+        # Read-only GET: no TMDB ingestion here. New content is ingested by the
+        # background content pipeline, never by a client GET.
         movies = db.get_top_movies(limit=limit, order_by=order_by, offset=offset, media_type=media_type)
-        
-        # If database doesn't have enough movies, fetch from TMDB
-        if len(movies) < limit:
-            from tmdb.fetcher import TMDBFetcher
-            fetcher = TMDBFetcher()
-            
-            # Calculate which TMDB page to fetch
-            tmdb_page = (offset // 20) + 1
-            
-            # Fetch from TMDB based on order_by and media_type
-            if media_type == 'tv':
-                if order_by == 'popularity':
-                    data = fetcher.get_popular_tv_series(page=tmdb_page)
-                else:
-                    data = fetcher.get_top_rated_tv_series(page=tmdb_page)
-            else:  # movie or all
-                if order_by == 'popularity':
-                    data = fetcher.get_popular_movies(page=tmdb_page)
-                elif order_by == 'tmdb_rating':
-                    data = fetcher.get_top_rated_movies(page=tmdb_page)
-                else:  # elo_score or default
-                    data = fetcher.get_popular_movies(page=tmdb_page)
-            
-            tmdb_movies = data.get('results', []) if data else []
-            
-            # Store fetched movies in database for future use
-            for movie in tmdb_movies:
-                try:
-                    movie_data = fetcher.parse_movie_data(movie)
-                    # Set media_type for TV series
-                    if media_type == 'tv' and 'media_type' not in movie_data:
-                        movie_data['media_type'] = 'tv'
-                    db.insert_movie(movie_data)
-                    
-                    # Store genres
-                    genres = fetcher.parse_genres(movie)
-                    for genre in genres:
-                        existing_genre = db.get_genre_by_name(genre['name'])
-                        if existing_genre:
-                            genre_id = existing_genre['genre_id']
-                        else:
-                            genre_id = db.insert_genre(genre['name'], genre.get('id'))
-                        db.link_movie_genre(movie_data['movie_id'], genre_id)
-                except Exception as e:
-                    logger.warning(f"Error storing movie {movie.get('id')}: {e}")
-                    continue
-            
-            # Re-fetch from database to get the stored movies
-            movies = db.get_top_movies(limit=limit, order_by=order_by, offset=offset)
         
         return jsonify({
             'movies': movies,
             'count': len(movies),
             'offset': offset,
             'has_more': len(movies) == limit,
-            'source': 'lazy_loaded'
+            'source': 'database'
         }), 200
         
     except Exception as e:
@@ -1282,8 +1433,9 @@ def get_cache_stats():
         
         # Get cache manager stats if available
         try:
-            cache_manager_stats = cache_manager.get_stats()
-        except:
+            cache_manager_stats = cache_manager.get_stats() or {}
+        except Exception as exc:
+            logger.warning(f"Cache manager stats unavailable: {exc}")
             cache_manager_stats = {
                 'movie_cache': {'size': 0, 'max_size': 100, 'hit_rate': 0},
                 'vector_cache': {'size': 0, 'max_size': 500, 'hit_rate': 0}
@@ -1342,12 +1494,12 @@ def test_tmdb():
             }), 500
             
     except Exception as e:
-        logger.error(f"TMDB test error: {e}")
-        import traceback
+        logger.error(f"TMDB test error: {e}", exc_info=True)
+        # Do not leak internal details/tracebacks to the caller
         return jsonify({
             'status': '❌ ERROR',
-            'error': str(e),
-            'traceback': traceback.format_exc()
+            'error': 'TMDB test failed',
+            'api_working': False
         }), 500
 
 
@@ -1355,17 +1507,30 @@ def test_tmdb():
 def monitor_cache():
     """Real-time cache monitoring with detailed metrics"""
     try:
-        cache_stats = cache_manager.get_stats()
-        
+        cache_stats = cache_manager.get_stats() or {}
+        movie_cache = cache_stats.get('movie_cache') or {}
+        vector_cache = cache_stats.get('vector_cache') or {}
+
+        def _stat(flat_key, nested, nested_key, default=0):
+            value = cache_stats.get(flat_key)
+            if value is None:
+                value = nested.get(nested_key, default)
+            return value if value is not None else default
+
+        movie_count = _stat('movie_count', movie_cache, 'size')
+        vector_count = _stat('vector_count', vector_cache, 'size')
+        movie_max = _stat('movie_max_size', movie_cache, 'max_size', 100) or 100
+        vector_max = _stat('vector_max_size', vector_cache, 'max_size', 500) or 500
+
         # Calculate percentages
-        movie_usage_percent = (cache_stats.get('movie_count', 0) / 100) * 100
-        vector_usage_percent = (cache_stats.get('vector_count', 0) / 500) * 100
+        movie_usage_percent = (movie_count / movie_max) * 100 if movie_max else 0
+        vector_usage_percent = (vector_count / vector_max) * 100 if vector_max else 0
         
         # Get hit rates
-        movie_hits = cache_stats.get('movie_hits', 0)
-        movie_misses = cache_stats.get('movie_misses', 0)
-        vector_hits = cache_stats.get('vector_hits', 0)
-        vector_misses = cache_stats.get('vector_misses', 0)
+        movie_hits = _stat('movie_hits', movie_cache, 'hits')
+        movie_misses = _stat('movie_misses', movie_cache, 'misses')
+        vector_hits = _stat('vector_hits', vector_cache, 'hits')
+        vector_misses = _stat('vector_misses', vector_cache, 'misses')
         
         movie_total = movie_hits + movie_misses
         vector_total = vector_hits + vector_misses
@@ -1374,13 +1539,17 @@ def monitor_cache():
         vector_hit_rate = (vector_hits / vector_total * 100) if vector_total > 0 else 0
         
         # Check if refill needed
-        needs_refill = cache_manager.needs_refill()
+        try:
+            needs_refill = cache_manager.needs_refill()
+        except Exception as exc:
+            logger.warning(f"needs_refill check failed: {exc}")
+            needs_refill = False
         
         return jsonify({
             'timestamp': cache_stats.get('timestamp'),
             'movie_cache': {
-                'count': cache_stats.get('movie_count', 0),
-                'max_size': 100,
+                'count': movie_count,
+                'max_size': movie_max,
                 'usage_percent': round(movie_usage_percent, 2),
                 'hits': movie_hits,
                 'misses': movie_misses,
@@ -1388,8 +1557,8 @@ def monitor_cache():
                 'eviction_strategy': 'LRU'
             },
             'vector_cache': {
-                'count': cache_stats.get('vector_count', 0),
-                'max_size': 500,
+                'count': vector_count,
+                'max_size': vector_max,
                 'usage_percent': round(vector_usage_percent, 2),
                 'hits': vector_hits,
                 'misses': vector_misses,

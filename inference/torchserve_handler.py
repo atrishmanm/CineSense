@@ -1,16 +1,32 @@
 """
 TorchServe Handler for CineSense Recommendation Models
 Production-ready model serving with batching and preprocessing
+
+STATUS: EXPERIMENTAL / UNUSED (D404). Not referenced by the Flask app;
+deploy with TorchServe only after verifying the checkpoint contract.
 """
 
+import os
 import torch
 import logging
 import json
 import numpy as np
-from ts.torch_handler.base_handler import BaseHandler
-from typing import List, Dict, Any
+from typing import List, Dict
+
+try:
+    from ts.torch_handler.base_handler import BaseHandler
+except ImportError:  # torchserve (`ts`) is optional and only present in a worker
+    class BaseHandler:  # minimal stand-in so this module stays importable
+        """Fallback used when TorchServe's ``ts`` package is not installed."""
+
+        def __init__(self):  # pragma: no cover - trivial
+            pass
 
 logger = logging.getLogger(__name__)
+
+# Production plot embeddings are 768-d (all-mpnet-base-v2); keep the fallback
+# zero-vector in the same dimension as the trained model.
+PLOT_EMBED_DIM = 768
 
 
 class CineSenseRecommenderHandler(BaseHandler):
@@ -49,6 +65,13 @@ class CineSenseRecommenderHandler(BaseHandler):
         
         # Load model checkpoint
         model_path = f"{model_dir}/model.pth"
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                f"TorchServe model artifact not found: {model_path}. "
+                "Build the model archive with export_model_for_torchserve(...) "
+                "or pass --serialized-file <checkpoint> when running "
+                "torch-model-archiver."
+            )
         try:
             self.model = torch.load(model_path, map_location=self.device)
             self.model.eval()
@@ -196,8 +219,8 @@ class CineSenseRecommenderHandler(BaseHandler):
         if self.plot_embeddings is not None and movie_id < len(self.plot_embeddings):
             return self.plot_embeddings[movie_id].tolist()
         else:
-            # Return zero vector if not available
-            return [0.0] * 384
+            # Return zero vector (same dim as the trained model) if not available
+            return [0.0] * PLOT_EMBED_DIM
     
     def _calculate_confidence(self, rating: float) -> float:
         """Calculate confidence score based on rating"""
@@ -209,23 +232,61 @@ class CineSenseRecommenderHandler(BaseHandler):
 
 def export_model_for_torchserve(
     model_path: str,
-    output_dir: str = "torchserve_models"
+    output_dir: str = "torchserve_models",
+    genre_encoder_path: str | None = None,
+    plot_embeddings_path: str | None = None,
 ):
     """
     Export CineSense model for TorchServe deployment
-    
+
     Args:
-        model_path: Path to trained model checkpoint
+        model_path: Path to trained model checkpoint (must exist)
         output_dir: Directory to save TorchServe artifacts
+        genre_encoder_path: Optional genre encoder JSON. Defaults to
+            ``<model dir>/genre_encoder.json`` when present.
+        plot_embeddings_path: Optional plot embeddings .npy. Defaults to
+            ``<model dir>/plot_embeddings.npy`` when present.
     """
-    import os
     import shutil
-    
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"Model checkpoint not found: {model_path}. "
+            "Train a model first and/or point at the real checkpoint "
+            "(see models/ for the bundled Kaggle checkpoints)."
+        )
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Copy model file
     shutil.copy(model_path, f"{output_dir}/model.pth")
-    
+
+    # Copy the auxiliary artifacts the handler expects. The handler loads
+    # genre_encoder.json for content-feature encoding; without it content
+    # features silently degrade, so flag it loudly.
+    model_dir = os.path.dirname(os.path.abspath(model_path))
+    src_genre = genre_encoder_path or os.path.join(model_dir, "genre_encoder.json")
+    src_plot = plot_embeddings_path or os.path.join(model_dir, "plot_embeddings.npy")
+
+    if os.path.exists(src_genre):
+        shutil.copy(src_genre, f"{output_dir}/genre_encoder.json")
+        print(f"✓ Copied genre encoder: {src_genre}")
+    else:
+        print(
+            "! WARNING: genre_encoder.json not found "
+            f"(looked in {src_genre}); the handler will run without genre "
+            "encoding. Copy/produce it before packaging."
+        )
+
+    if os.path.exists(src_plot):
+        shutil.copy(src_plot, f"{output_dir}/plot_embeddings.npy")
+        print(f"✓ Copied plot embeddings: {src_plot}")
+    else:
+        print(
+            "! NOTE: plot_embeddings.npy not found "
+            f"(looked in {src_plot}); the handler will use zero vectors."
+        )
+
     print(f"✓ Model exported to {output_dir}")
     print("\nTo create TorchServe model archive:")
     print("""

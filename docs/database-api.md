@@ -8,12 +8,12 @@
 
 | Object | In `schema.sql` | Live (MySQL 8.0.44, verified Oct 2026) |
 |--------|---------------|------------------------------------------|
-| Tables | **28** | 42 (28 core + 14 social/migration: friendships, watch parties, lists, chat, A/B, `schema_migrations`) |
+| Tables | **36** | 42 (schema.sql now includes the 7 social tables + `schema_migrations`; live DB also has a few app-created extras) |
 | Views | **24** | 24 ✓ |
 | Stored procedures | **24** | 25 (24 + `get_semantic_search_results` from social setup) — all create cleanly after the LOCK TABLES fix below |
 | Functions | **8** | 8 ✓ |
 | Triggers | **11** | 11 ✓ |
-| Standalone CREATE INDEX | 4 (+ 54 inline KEY/INDEX + 3 FULLTEXT) | — |
+| Standalone CREATE INDEX | 10 (+ 54 inline KEY/INDEX + 3 FULLTEXT) | — |
 
 > LOCK TABLES fix (Oct 2026): three procedures used `LOCK TABLES`, which is
 > illegal inside MySQL stored programs — they silently failed to create
@@ -25,7 +25,7 @@ Authoritative file: `database/schema.sql`. Access via `database/db_manager.py`
 (singleton, 10-connection pool, parameterized calls). Migrations:
 `database/run_migration.py`.
 
-### Tables (28)
+### Tables (36)
 
 Core: `users`, `movies`, `genres`, `directors`, `actors`,
 `movie_genres`, `movie_directors`, `movie_actors`,
@@ -36,6 +36,10 @@ Core: `users`, `movies`, `genres`, `directors`, `actors`,
 Extended (`IF NOT EXISTS`): `keywords`, `semantic_embeddings`, `search_logs`,
 `user_moods`, `recommendation_feedback`, `ab_test_assignments`,
 `ab_test_metrics`, `model_versions`.
+Social (added to schema.sql Oct 2026): `friend_requests`, `friendships`,
+`watch_parties`, `watch_party_invites`, `collaborative_lists`,
+`collaborative_list_items`, `collaborative_list_members`.
+Migration bookkeeping: `schema_migrations`.
 
 ### Views (24)
 

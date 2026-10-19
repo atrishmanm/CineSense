@@ -5,12 +5,12 @@ memory/forgetting, and natural language explanations
 """
 
 import numpy as np
-from sklearn.decomposition import TruncatedSVD, PCA
+from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import StandardScaler
 from scipy.special import softmax
 from config import Config
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -357,8 +357,9 @@ class NaturalLanguageExplainer:
         # Genre personality
         if 'top_genres' in user_profile:
             genres = user_profile['top_genres'][:3]
-            genre_str = ', '.join(genres[:-1]) + f" and {genres[-1]}" if len(genres) > 1 else genres[0]
-            summaries.append(f"You're drawn to {genre_str}")
+            if genres:
+                genre_str = ', '.join(genres[:-1]) + f" and {genres[-1]}" if len(genres) > 1 else genres[0]
+                summaries.append(f"You're drawn to {genre_str}")
         
         # Era preference
         if 'avg_release_year' in user_profile:

@@ -2,6 +2,10 @@
 CineSense Scale & Production Systems Benchmark Harness
 ======================================================
 
+Standalone CLI (`python -m benchmarks.run_scale_benchmark`).  NOTE: this
+module's ``main`` is not wired into ``benchmarks/run_all_benchmarks.py``;
+run it directly (D405).
+
 Evaluates all newly built production-scale subsystems using REAL MovieLens-100K data:
 1. HNSW Vector Index vs Brute-force Cosine Scan (Recall@10, P95 latency).
 2. XFetch Probabilistic Cache & Singleflight under concurrent load.
@@ -19,19 +23,18 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 import numpy as np
 
 from benchmarks.data_loader import load_movies, load_ratings, create_splits
-from ai.vector_search import HNSWIndex, ProductQuantizer, ReciprocalRankFusion
-from ai.xfetch_cache import XFetchCache, Singleflight
-from ai.multi_stage_ranker import MultiStageRanker, PlattCalibrator
+from ai.vector_search import HNSWIndex
+from ai.xfetch_cache import XFetchCache
+from ai.multi_stage_ranker import MultiStageRanker
 from ai.feature_store import OnlineFeatureStore
-from ai.resilience import CircuitBreaker, CircuitBreakerOpenException, DeadlineContext, TokenBucketRateLimiter, IdempotencyRegistry
+from ai.resilience import CircuitBreaker
 from ai.ab_experimentation import ExperimentationEngine
 from ai.drift_monitor import DriftMonitor
-from ai.diversity_engine import DPPDiversifier, CalibratedReranker
-from ai.telemetry import LatencyHistogram, FunnelTracker
+from ai.diversity_engine import DPPDiversifier
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -121,7 +124,7 @@ def main():
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(cache.get, "user:42:recs", heavy_rec_computer, 0.1) for _ in range(50)]
-        results = [f.result() for f in futures]
+        _ = [f.result() for f in futures]
 
     report["xfetch_caching"] = {
         "total_requests": 50,

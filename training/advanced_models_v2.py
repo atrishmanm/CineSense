@@ -6,7 +6,7 @@ Improves RMSE from 0.9 to target 0.65-0.75
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 
 class MultiHeadAttention(nn.Module):
@@ -110,6 +110,9 @@ class AdvancedHybridRecommender(nn.Module):
         num_transformer_blocks: int = 2,
         num_heads: int = 8,
         content_feature_dim: int = 55,
+        # NOTE: production plot embeddings are 768-d (all-mpnet-base-v2); this
+        # default is 384 for the lightweight/legacy path. Pass plot_embed_dim=768
+        # when training against the real embeddings (see training/train.py).
         plot_embed_dim: int = 384,
         dropout: float = 0.2
     ):

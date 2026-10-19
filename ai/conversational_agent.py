@@ -3,9 +3,7 @@ Conversational Movie Discovery Agent
 ChatGPT-style interactive movie recommendations
 """
 
-from typing import List, Dict, Optional
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -139,10 +137,20 @@ class ConversationalRecommender:
         
         if self.db:
             try:
+                # Aggregate across ALL mapped genres (not just the first genre
+                # that happens to return rows) so the mood pool is complete.
+                collected = []
+                seen_ids = set()
                 for genre in genres:
-                    movies = self.db.get_movies_by_genre(genre, limit=limit)
-                    if movies:
-                        return movies[:limit]
+                    for movie in (self.db.get_movies_by_genre(genre, limit=limit) or []):
+                        mid = movie.get('movie_id')
+                        if mid is not None:
+                            if mid in seen_ids:
+                                continue
+                            seen_ids.add(mid)
+                        collected.append(movie)
+                if collected:
+                    return collected[:limit]
                 # Fallback to top movies
                 return self.db.get_top_movies(limit=limit)
             except Exception as e:
@@ -162,11 +170,20 @@ class ConversationalRecommender:
         """Get recommended movies based on extracted preferences"""
         if self.db:
             try:
-                # Try genre-based first
+                # Aggregate across all extracted genres rather than returning on
+                # the first genre that yields rows.
+                collected = []
+                seen_ids = set()
                 for genre in prefs.get('genres', []):
-                    movies = self.db.get_movies_by_genre(genre.capitalize(), limit=limit)
-                    if movies:
-                        return movies[:limit]
+                    for movie in (self.db.get_movies_by_genre(genre.capitalize(), limit=limit) or []):
+                        mid = movie.get('movie_id')
+                        if mid is not None:
+                            if mid in seen_ids:
+                                continue
+                            seen_ids.add(mid)
+                        collected.append(movie)
+                if collected:
+                    return collected[:limit]
                 # Fallback to top movies
                 return self.db.get_top_movies(limit=limit)
             except Exception as e:
