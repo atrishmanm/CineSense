@@ -26,6 +26,9 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 CHAT_RECOMMENDATION_LIMIT = 20
 MAX_RESULT_LIMIT = 100          # hard cap for client-supplied top_k/limit
 STARTUP_INDEX_LIMIT = 10000     # movies indexed into semantic search at startup
+# Per-image upload guard (~5 MB of binary = ~6.8M base64 chars). Tighter than
+# the 16 MB request cap so one oversized image cannot starve the CLIP encoder.
+_MAX_IMAGE_B64_CHARS = 6_800_000
 
 
 def _json_body():
@@ -548,6 +551,12 @@ def create_app():
 
         if not image_input:
             return jsonify({'error': 'Image input required (base64)'}), 400
+
+        # Per-image payload guard (audit E458): reject oversized uploads even
+        # though MAX_CONTENT_LENGTH allows a larger request body. Base64 length
+        # maps to ~3/4 of the binary size, so this cap means ~5 MB of image data.
+        if not isinstance(image_input, str) or len(image_input) > _MAX_IMAGE_B64_CHARS:
+            return jsonify({'error': 'Image too large (max ~5 MB)'}), 413
 
         if 'visual_search' not in app.ai_systems:
             return jsonify({'error': 'Visual search model not loaded', 'results': []}), 503

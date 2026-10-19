@@ -562,19 +562,28 @@ def get_recommendations():
 
         try:
             limit = _parse_limit(request.args.get('limit'), default=20)
+            offset = _parse_offset(request.args.get('offset'))
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
 
         if not user_id:
-            # Guest user: return popular movies
-            movies = db.get_top_movies(limit=limit, order_by='popularity')
+            # Guest user: return popular movies (offset honored via slice)
+            if offset:
+                pool = db.get_top_movies(limit=limit + offset, order_by='popularity')
+                movies = pool[offset:offset + limit]
+            else:
+                movies = db.get_top_movies(limit=limit, order_by='popularity')
             return jsonify({
                 'movies': movies,
                 'personalized': False
             }), 200
-        
-        # Get personalized recommendations
-        recommendations = recommender.get_recommendations(user_id, n=limit)
+
+        # Get personalized recommendations (fetch limit+offset, slice out offset)
+        if offset:
+            recommendations = recommender.get_recommendations(
+                user_id, n=limit + offset)[offset:offset + limit]
+        else:
+            recommendations = recommender.get_recommendations(user_id, n=limit)
         
         return jsonify({
             'movies': recommendations,
