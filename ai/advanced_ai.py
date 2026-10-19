@@ -15,6 +15,17 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# NLG presentation thresholds (audit A130-A133): they tune explanation
+# wording only, never scores. Values preserved from the original literals.
+_NLG_STRONG_SIMILARITY = 0.8      # similarity that justifies "strongly" recommending
+_NLG_MODERATE_SIMILARITY = 0.6    # similarity that justifies "moderately" recommending
+_NLG_MATURING_INTERACTIONS = 20   # count that ends the "still learning" copy tier
+                                  # (the 5-interaction tier is Config.MIN_INTERACTIONS_FOR_PERSONALIZATION)
+_NLG_CLASSIC_FILM_YEAR = 1990     # avg era year below which copy says "classic cinema"
+_NLG_MODERN_FILM_YEAR = 2010      # avg era year above which copy favors "modern filmmaking"
+_NLG_HIGH_RATING_BAR = 7.5        # avg rating above which copy praises high standards
+_NLG_HIDDEN_GEM_RATING = 6.5      # avg rating below which copy praises hidden gems
+
 
 class LatentSpaceEncoder:
     """
@@ -112,7 +123,7 @@ class ImplicitSignalProcessor:
         if 'hover_time' in interaction_data:
             hover_seconds = interaction_data['hover_time']
             # Normalize: 0-5 seconds → 0-1 score
-            hover_score = min(hover_seconds / 5.0, 1.0)
+            hover_score = min(hover_seconds / Config.HOVER_TIME_SCALE_SECONDS, 1.0)
             reward += hover_score * self.signal_weights['hover_time']
         
         # Skip penalty
@@ -143,7 +154,7 @@ class ImplicitSignalProcessor:
         implicit_reward = self.calculate_implicit_reward(implicit_data)
         
         # Combine: base reward is primary, implicit is adjustment
-        enriched = base_reward + (implicit_reward * 0.3)  # 30% weight to implicit
+        enriched = base_reward + (implicit_reward * Config.IMPLICIT_SIGNAL_MIX)  # weight of implicit reward
         
         # Clip to valid range
         return np.clip(enriched, 0.0, 1.0)
@@ -302,9 +313,9 @@ class NaturalLanguageExplainer:
                 )
         
         # Confidence level
-        if similarity_score > 0.8:
+        if similarity_score > _NLG_STRONG_SIMILARITY:
             confidence = "strongly"
-        elif similarity_score > 0.6:
+        elif similarity_score > _NLG_MODERATE_SIMILARITY:
             confidence = "moderately"
         else:
             confidence = "cautiously"
@@ -329,9 +340,9 @@ class NaturalLanguageExplainer:
         Returns:
             string explanation
         """
-        if interaction_count < 5:
+        if interaction_count < Config.MIN_INTERACTIONS_FOR_PERSONALIZATION:
             return "I'm just getting to know your taste. A few more choices will help!"
-        elif interaction_count < 20:
+        elif interaction_count < _NLG_MATURING_INTERACTIONS:
             if accuracy_trend == 'improving':
                 return "I'm learning quickly - your preferences are becoming clearer."
             else:
@@ -364,17 +375,17 @@ class NaturalLanguageExplainer:
         # Era preference
         if 'avg_release_year' in user_profile:
             year = user_profile['avg_release_year']
-            if year < 1990:
+            if year < _NLG_CLASSIC_FILM_YEAR:
                 summaries.append("with a love for classic cinema")
-            elif year > 2010:
+            elif year > _NLG_MODERN_FILM_YEAR:
                 summaries.append("favoring modern filmmaking")
         
         # Rating standards
         if 'avg_rating_preference' in user_profile:
             rating = user_profile['avg_rating_preference']
-            if rating > 7.5:
+            if rating > _NLG_HIGH_RATING_BAR:
                 summaries.append("You have high standards - critically acclaimed films resonate with you")
-            elif rating < 6.5:
+            elif rating < _NLG_HIDDEN_GEM_RATING:
                 summaries.append("You appreciate hidden gems and underrated films")
         
         return ". ".join(summaries) + "." if summaries else "Your taste profile is still forming."

@@ -16,6 +16,8 @@ from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
+from config import Config
+
 
 class OnlineFeatureStore:
     """
@@ -23,7 +25,10 @@ class OnlineFeatureStore:
     Stores pre-computed user and item feature representations with sub-millisecond retrieval.
     """
 
-    def __init__(self, decay_rate: float = 0.10) -> None:
+    # Taste-vector EMA step (audit A148). Deliberately NOT the interaction
+    # recency factor (Config.TEMPORAL_DECAY_FACTOR = 0.7): this rate blends
+    # each new interaction into the online taste vector.
+    def __init__(self, decay_rate: float = Config.TASTE_EMA_DECAY_RATE) -> None:
         self.decay_rate = decay_rate
         # user_id -> feature dict
         self._user_features: Dict[int, Dict[str, Any]] = defaultdict(dict)
@@ -36,9 +41,9 @@ class OnlineFeatureStore:
         self,
         item_id: int,
         genres_vector: np.ndarray,
-        elo_score: float = 1500.0,
+        elo_score: float = Config.INITIAL_ELO_SCORE,
         popularity: float = 1.0,
-        release_year: int = 2000,
+        release_year: int = Config.FEATURE_STORE_BASE_YEAR,
     ) -> None:
         """Register or update an item's feature vector."""
         self._item_features[item_id] = {
@@ -70,7 +75,8 @@ class OnlineFeatureStore:
             if curr_user_vec is None:
                 new_vec = item_vec.copy()
             else:
-                # EMA update
+                # EMA update. Concept parallels TemporalMemoryManager's decay
+                # (audit A151) but here it smooths the online taste vector.
                 new_vec = (1.0 - self.decay_rate) * curr_user_vec + self.decay_rate * item_vec
             
             norm = np.linalg.norm(new_vec)

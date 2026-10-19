@@ -10,6 +10,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from config import Config
+
 
 class TrendingDetector:
     """
@@ -27,12 +29,13 @@ class TrendingDetector:
             db_manager: Database manager instance
         """
         self.db = db_manager
-        self.time_windows = [1, 6, 24, 72, 168]  # hours: 1h, 6h, 1d, 3d, 7d
+        # list() copy: never mutate the shared Config window list.
+        self.time_windows = list(Config.TRENDING_TIME_WINDOWS_HOURS)  # hours: 1h, 6h, 1d, 3d, 7d
     
     def calculate_trending_score(
         self,
         movie_id: int,
-        lookback_hours: int = 168
+        lookback_hours: int = Config.TRENDING_LOOKBACK_HOURS
     ) -> float:
         """
         Calculate trending score for a movie
@@ -91,13 +94,14 @@ class TrendingDetector:
                 # High positive acceleration = going viral
                 # High constant velocity = sustained popularity
                 trending_score = (
-                    recent_velocity * 0.5 +      # Recent activity weight
-                    avg_velocity * 0.2 +          # Sustained activity weight
-                    recent_acceleration * 0.3     # Growth rate weight
+                    recent_velocity * Config.TRENDING_WEIGHT_RECENT_VELOCITY +      # Recent activity weight
+                    avg_velocity * Config.TRENDING_WEIGHT_AVG_VELOCITY +            # Sustained activity weight
+                    recent_acceleration * Config.TRENDING_WEIGHT_ACCELERATION       # Growth rate weight
                 )
                 
                 # Normalize to 0-100 scale (heuristic)
-                trending_score = min(max(trending_score * 10, 0), 100)
+                # 0-100 heuristic normalization (A137)
+                trending_score = min(max(trending_score * Config.TRENDING_SCORE_SCALE, 0), Config.TRENDING_SCORE_MAX)
                 
                 return float(trending_score)
             
@@ -109,9 +113,9 @@ class TrendingDetector:
     
     def get_trending_movies(
         self,
-        limit: int = 20,
-        min_interactions: int = 10,
-        time_window_hours: int = 168
+        limit: int = Config.TRENDING_DEFAULT_LIMIT,
+        min_interactions: int = Config.TRENDING_MIN_INTERACTIONS,
+        time_window_hours: int = Config.TRENDING_LOOKBACK_HOURS
     ) -> List[Dict]:
         """
         Get currently trending movies
@@ -325,7 +329,10 @@ class TrendingDetector:
                 score = movie['trending_score']
                 
                 # Look for movies with moderate score but high acceleration
-                if 20 <= score <= 60:  # Growing, not yet peaked
+                if (
+                        Config.TRENDING_VIRAL_PREDICTION_MIN_SCORE
+                        <= score <= Config.TRENDING_VIRAL_PREDICTION_MAX_SCORE
+                ):  # Growing, not yet peaked (A139)
                     movie_id = movie['movie_id']
                     
                     # Check if acceleration is positive
@@ -354,7 +361,7 @@ class TrendingDetector:
                     if prev_count > 0:
                         growth = (recent_count - prev_count) / prev_count
                         
-                        if growth > 0.3:  # 30% growth
+                        if growth > Config.TRENDING_VIRAL_GROWTH_THRESHOLD:  # 30% growth (A140)
                             movie['predicted_viral_probability'] = min(growth * 100, 100)
                             predictions.append(movie)
             

@@ -28,7 +28,7 @@ class MultiArmedBandit:
         self.arm_rewards = {}  # arm_id -> list of rewards
         self.arm_counts = {}   # arm_id -> selection count
     
-    def select_arm(self, available_arms, top_k=2):
+    def select_arm(self, available_arms, top_k=Config.COMPARISON_BATCH_SIZE):
         """
         Select k arms (movies) to show user
         Uses epsilon-greedy strategy
@@ -114,7 +114,7 @@ class UCBBandit:
     Automatically balances exploration and exploitation
     """
     
-    def __init__(self, c=2.0):
+    def __init__(self, c=Config.BANDIT_UCB_C):
         """
         Initialize UCB bandit
         
@@ -152,7 +152,7 @@ class UCBBandit:
         
         return avg_reward + confidence
     
-    def select_arm(self, available_arms, top_k=2):
+    def select_arm(self, available_arms, top_k=Config.COMPARISON_BATCH_SIZE):
         """
         Select k arms with highest UCB values
         
@@ -229,7 +229,7 @@ class ThompsonSampling:
         self.arm_successes = {}  # arm_id -> success count
         self.arm_failures = {}   # arm_id -> failure count
     
-    def select_arm(self, available_arms, top_k=2):
+    def select_arm(self, available_arms, top_k=Config.COMPARISON_BATCH_SIZE):
         """
         Select arms using Thompson Sampling
         Samples from Beta distribution for each arm
@@ -303,7 +303,7 @@ class ContextualBandit:
     Uses linear model: reward = user_context · arm_features
     """
     
-    def __init__(self, context_dim, learning_rate=0.1):
+    def __init__(self, context_dim, learning_rate=Config.LEARNING_RATE):
         """
         Initialize contextual bandit
         
@@ -334,7 +334,12 @@ class ContextualBandit:
         reward = np.dot(self.arm_weights[arm_id], context)
         return reward
     
-    def select_arm(self, available_arms, context, top_k=2, epsilon=0.1):
+    # Epsilon default is unified with Config.EXPLORATION_RATE (audit A120):
+    # this class kept its own 0.1 while the epsilon-greedy bandit used 0.2.
+    # Nothing in production calls ContextualBandit, so the 0.1 -> 0.2 default
+    # change only affects this unwired experimental class; users of it can
+    # still pass epsilon explicitly.
+    def select_arm(self, available_arms, context, top_k=Config.COMPARISON_BATCH_SIZE, epsilon=Config.EXPLORATION_RATE):
         """
         Select arms given context
         
@@ -398,13 +403,13 @@ if __name__ == "__main__":
     
     # Test Multi-Armed Bandit
     print("\n1. Epsilon-Greedy Multi-Armed Bandit:")
-    bandit = MultiArmedBandit(exploration_rate=0.2)
+    bandit = MultiArmedBandit(exploration_rate=Config.EXPLORATION_RATE)
     
     arms = [1, 2, 3, 4, 5]
     
     # Simulate 100 selections
     for _ in range(100):
-        selected = bandit.select_arm(arms, top_k=2)
+        selected = bandit.select_arm(arms, top_k=Config.COMPARISON_BATCH_SIZE)
         # Arm 3 is "best" - give it higher reward
         for arm in selected:
             reward = 1.0 if arm == 3 else 0.3
@@ -417,7 +422,7 @@ if __name__ == "__main__":
     
     # Test UCB Bandit
     print("\n2. UCB Bandit:")
-    ucb = UCBBandit(c=2.0)
+    ucb = UCBBandit(c=Config.BANDIT_UCB_C)
     
     # Simulate selections
     for _ in range(50):

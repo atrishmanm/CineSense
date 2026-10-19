@@ -16,6 +16,8 @@ import math
 from typing import Any, Dict, List
 import numpy as np
 
+from config import Config
+
 
 class PlattCalibrator:
     """
@@ -23,7 +25,12 @@ class PlattCalibrator:
     P(Y=1 | score) = 1 / (1 + exp(A * score + B))
     """
 
-    def __init__(self, a: float = -2.5, b: float = 0.5) -> None:
+    # Calibrated from held-out pairwise data. Defaults preserved (A141).
+    def __init__(
+        self,
+        a: float = Config.PLATT_CALIBRATION_A,
+        b: float = Config.PLATT_CALIBRATION_B,
+    ) -> None:
         self.a = a
         self.b = b
 
@@ -44,9 +51,11 @@ class MultiStageRanker:
 
     def __init__(
         self,
-        weight_relevance: float = 0.50,
-        weight_engagement: float = 0.30,
-        weight_quality: float = 0.20,
+        # Weights mirror the production scorer's content/preference/ELO mix
+        # (Config.RECOMMEND_WEIGHT_*, audit A142-A144).
+        weight_relevance: float = Config.RECOMMEND_WEIGHT_CONTENT,
+        weight_engagement: float = Config.RECOMMEND_WEIGHT_PREFERENCE,
+        weight_quality: float = Config.RECOMMEND_WEIGHT_ELO,
         enable_ips_debiasing: bool = True,
     ) -> None:
         self.w_rel = weight_relevance
@@ -75,10 +84,13 @@ class MultiStageRanker:
         p_relevant = self.calibrator.calibrate(content_similarity)
 
         # 2. Engagement objective: Pairwise preference sigmoid
-        p_engagement = float(1.0 / (1.0 + math.exp(-5.0 * user_preference_score)))
+        p_engagement = float(1.0 / (1.0 + math.exp(-Config.PREFERENCE_SIGMOID_SCALE * user_preference_score)))
 
-        # 3. Quality objective: Normalized ELO score
-        s_quality = max(0.0, min(1.0, (elo_score - 1000.0) / 1000.0))
+        # 3. Quality objective: ELO normalized to [0, 1].
+        # ELO_BASE (1000) is the normalization floor for the community ELO
+        # scale; INITIAL_ELO_SCORE (1500) is the separate START value for
+        # unranked items (raw_elo default below) - two distinct anchors.
+        s_quality = max(0.0, min(1.0, (elo_score - Config.ELO_BASE) / Config.ELO_BASE))
 
         # Combined multi-objective score (weights sum to 1.0)
         base_score = (
@@ -88,9 +100,12 @@ class MultiStageRanker:
         )
 
         # Exploration bonus for cold items (Upper Confidence Bound style)
-        if item_impression_count < 20:
-            explore_bonus = 0.15 * math.sqrt(math.log(max(total_system_impressions, 10)) / max(item_impression_count, 1))
-            explore_bonus = min(0.20, explore_bonus)
+        if item_impression_count < Config.COLD_ITEM_IMPRESSION_THRESHOLD:
+            explore_bonus = (
+                Config.EXPLORATION_BONUS_COEFFICIENT
+                * math.sqrt(math.log(max(total_system_impressions, Config.MIN_SYSTEM_IMPRESSIONS)) / max(item_impression_count, 1))
+            )
+            explore_bonus = min(Config.EXPLORATION_BONUS_MAX, explore_bonus)
         else:
             explore_bonus = 0.0
 
@@ -129,7 +144,7 @@ class MultiStageRanker:
 
             # Preference & ELO
             raw_pref = user_pref_model.get_preference_score(mid) if hasattr(user_pref_model, "get_preference_score") else 0.0
-            raw_elo = float(cand.get("elo_score", 1500.0))
+            raw_elo = float(cand.get("elo_score", Config.INITIAL_ELO_SCORE))
             imp_count = int(cand.get("impression_count", 50))
 
             score_dict = self.score_candidate(

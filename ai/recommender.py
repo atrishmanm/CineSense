@@ -33,7 +33,9 @@ def _normalize_elo(raw_elo):
     swamp the other weighted components.
     """
     try:
-        return max(0.0, min(1.0, (float(raw_elo) - 1000.0) / 1000.0))
+        # ELO_BASE floors raw ELO for ranking; INITIAL_ELO_SCORE (1500) is
+        # the separate start value for fresh movies/users (see config.py).
+        return max(0.0, min(1.0, (float(raw_elo) - Config.ELO_BASE) / Config.ELO_BASE))
     except (TypeError, ValueError):
         return 0.5
 
@@ -49,7 +51,7 @@ class CineSenseRecommender:
         
         # AI Layer 1: Pairwise Learning
         self.pairwise_learner = PairwiseLearner(
-            k_factor=32,
+            k_factor=Config.ELO_K_FACTOR,
             initial_rating=Config.INITIAL_ELO_SCORE
         )
         
@@ -64,7 +66,7 @@ class CineSenseRecommender:
         self.encoders_fitted = False
         
         # AI Layer 3: Reinforcement Learning
-        self.bandit = UCBBandit(c=2.0)
+        self.bandit = UCBBandit(c=Config.BANDIT_UCB_C)
         
         # Advanced AI Components
         self.latent_encoder = LatentSpaceEncoder() if Config.USE_DIMENSIONALITY_REDUCTION else None
@@ -121,10 +123,12 @@ class CineSenseRecommender:
                 self.dl_scorer = None
         
         # User-specific models
-        # NOTE: UserPreferenceModel is RAM-only (never persisted), so its
-        # comparison_count resets on every process restart. The authoritative
-        # cold-start threshold is the DB interaction count
-        # (Config.MIN_INTERACTIONS_FOR_PERSONALIZATION), used below.
+        # NOTE: UserPreferenceModel state is RAM-only; _load_user_model
+        # warm-starts it from the user's stored pairwise history on first
+        # touch (audit N18), so a process restart no longer regresses users
+        # to cold start. The model's replayed comparison_count and the DB
+        # cold-start threshold (Config.MIN_INTERACTIONS_FOR_PERSONALIZATION)
+        # now agree by construction.
         self.user_models = {}  # user_id -> UserPreferenceModel
         self.user_embeddings = {}  # user_id -> UserEmbedding
         
@@ -178,8 +182,52 @@ class CineSenseRecommender:
     def _get_user_model(self, user_id):
         """Get or create user preference model"""
         if user_id not in self.user_models:
-            self.user_models[user_id] = UserPreferenceModel(user_id)
+            self.user_models[user_id] = self._load_user_model(user_id)
         return self.user_models[user_id]
+
+    def _load_user_model(self, user_id):
+        """Create a UserPreferenceModel, warm-started from stored DB history.
+
+        UserPreferenceModel state lives only in RAM, so previously every
+        process restart pushed every user back to cold start until they redo
+        Config.MIN_INTERACTIONS_FOR_PERSONALIZATION fresh comparisons
+        (audit N18). Replaying the stored pairwise rows into a fresh model
+        reconstructs the same in-memory state the user would have
+        accumulated live. Read-only warm start: new comparisons keep being
+        persisted through db.record_interaction as before (no write-through
+        is added). Any DB failure degrades gracefully to a cold model.
+        """
+        model = UserPreferenceModel(user_id)
+        try:
+            interactions = db.get_user_interactions(
+                user_id, limit=Config.MODEL_WARM_START_LIMIT
+            )
+        except Exception as e:
+            logger.warning(f"Could not warm-start user model for {user_id}: {e}")
+            return model
+
+        # Rows come back most-recent-first; replay chronologically so the
+        # preference accumulation order matches the live experience.
+        replayed = 0
+        for interaction in reversed(interactions):
+            chosen = interaction.get('chosen_movie_id')
+            movie_1 = interaction.get('movie_1_id')
+            movie_2 = interaction.get('movie_2_id')
+            # 'chosen' must be one of the presented pair (skip malformed rows).
+            rejected = movie_2 if chosen == movie_1 else (
+                movie_1 if chosen == movie_2 else None
+            )
+            if chosen is None or rejected is None:
+                continue
+            model.record_preference(chosen, rejected)
+            replayed += 1
+
+        if replayed:
+            logger.info(
+                f"Warm-started preference model for user {user_id} from "
+                f"{replayed} stored comparison(s)"
+            )
+        return model
     
     def _get_user_embedding(self, user_id):
         """Get or create user embedding"""
@@ -282,7 +330,7 @@ class CineSenseRecommender:
             # ==============================================================
             # AI LAYER 1: Update ELO scores (pairwise learning)
             # ==============================================================
-            db.update_movie_elo(chosen_movie_id, rejected_movie_id, k_factor=32)
+            db.update_movie_elo(chosen_movie_id, rejected_movie_id, k_factor=Config.ELO_K_FACTOR)
             
             # Update user preference model
             user_model = self._get_user_model(user_id)
@@ -346,12 +394,12 @@ class CineSenseRecommender:
         """
         try:
             # Get candidate movies (lower threshold for small databases)
-            candidates = db.get_random_movies(limit=50, min_popularity=min_popularity)
+            candidates = db.get_random_movies(limit=Config.COMPARISON_POOL_SIZE, min_popularity=min_popularity)
             
             if len(candidates) < 2:
                 logger.warning(f"Not enough movies for comparison. Found {len(candidates)} movies")
                 # Try without popularity filter
-                candidates = db.get_random_movies(limit=50, min_popularity=0)
+                candidates = db.get_random_movies(limit=Config.COMPARISON_POOL_SIZE, min_popularity=0)
             
             if len(candidates) < 2:
                 logger.error("Still not enough movies for comparison")
@@ -407,7 +455,7 @@ class CineSenseRecommender:
                 return db.get_top_movies(limit=n, order_by='popularity')
             
             # Get movies user has already interacted with
-            interactions = db.get_user_interactions(user_id, limit=100)
+            interactions = db.get_user_interactions(user_id, limit=Config.RECENT_INTERACTIONS_LIMIT)
             seen_movie_ids = set()
             for interaction in interactions:
                 seen_movie_ids.add(interaction['movie_1_id'])
@@ -423,17 +471,20 @@ class CineSenseRecommender:
             user_vector = user_embedding.get_embedding()
 
             # Get candidate movies
-            all_movies = db.get_top_movies(limit=500, order_by='elo_score')
+            all_movies = db.get_top_movies(limit=Config.RECOMMEND_CANDIDATE_POOL, order_by='elo_score')
 
             # Score weights (sum to exactly 1.0)
             if self.dl_scorer and user_genre_vec is not None:
                 dl_w = float(getattr(Config, 'DL_SCORE_WEIGHT', 0.15))
-                w_content = (1.0 - dl_w) * 0.50
-                w_pref = (1.0 - dl_w) * 0.30
-                w_elo = (1.0 - dl_w) * 0.20
+                w_content = (1.0 - dl_w) * Config.RECOMMEND_WEIGHT_CONTENT
+                w_pref = (1.0 - dl_w) * Config.RECOMMEND_WEIGHT_PREFERENCE
+                w_elo = (1.0 - dl_w) * Config.RECOMMEND_WEIGHT_ELO
                 w_dl = dl_w
             else:
-                w_content, w_pref, w_elo, w_dl = 0.50, 0.30, 0.20, 0.0
+                w_content = Config.RECOMMEND_WEIGHT_CONTENT
+                w_pref = Config.RECOMMEND_WEIGHT_PREFERENCE
+                w_elo = Config.RECOMMEND_WEIGHT_ELO
+                w_dl = 0.0
 
             # Score each movie
             movie_scores = []
@@ -455,7 +506,7 @@ class CineSenseRecommender:
 
                 # 2. Preference score: sigmoid-normalized to [0, 1]
                 raw_pref = user_model.get_preference_score(movie_id)
-                norm_preference_score = float(1.0 / (1.0 + np.exp(-5.0 * raw_pref)))
+                norm_preference_score = float(1.0 / (1.0 + np.exp(-Config.PREFERENCE_SIGMOID_SCALE * raw_pref)))
 
                 # 3. Global quality: ELO normalized to [0, 1] (shared helper)
                 raw_elo = float(movie.get('elo_score', Config.INITIAL_ELO_SCORE))
@@ -510,7 +561,7 @@ class CineSenseRecommender:
             # Fallback to popular movies
             return db.get_top_movies(limit=n, order_by='popularity')
     
-    def apply_diversity_rerank(self, ranked_items, top_n=20, lambda_diversity=0.3):
+    def apply_diversity_rerank(self, ranked_items, top_n=20, lambda_diversity=Config.DIVERSITY_MMR_LAMBDA):
         """
         Maximal Marginal Relevance (MMR) diversity reranking.
         Balances item relevance score with pairwise dissimilarity to already selected items.
@@ -666,7 +717,7 @@ class CineSenseRecommender:
         """
         try:
             # Get user interaction history with temporal weights
-            interactions = db.get_user_interactions(user_id, limit=100)
+            interactions = db.get_user_interactions(user_id, limit=Config.RECENT_INTERACTIONS_LIMIT)
             
             # Same cold-start threshold as the production path (DB interaction count).
             if not interactions or len(interactions) < Config.MIN_INTERACTIONS_FOR_PERSONALIZATION:
@@ -680,7 +731,7 @@ class CineSenseRecommender:
             user_vector = self._build_temporal_user_vector(weighted_interactions)
             
             # Get candidate movies
-            all_movies = db.get_top_movies(limit=500)
+            all_movies = db.get_top_movies(limit=Config.RECOMMEND_CANDIDATE_POOL)
             
             # Filter out already seen
             seen_ids = set()
@@ -717,9 +768,9 @@ class CineSenseRecommender:
                 # shared helper so this path matches the production path's scale
                 # for the `recommendation_score` key.
                 final_score = (
-                    0.5 * content_score +
-                    0.3 * preference_score +
-                    0.2 * _normalize_elo(movie.get('elo_score', Config.INITIAL_ELO_SCORE))
+                    Config.RECOMMEND_WEIGHT_CONTENT * content_score +
+                    Config.RECOMMEND_WEIGHT_PREFERENCE * preference_score +
+                    Config.RECOMMEND_WEIGHT_ELO * _normalize_elo(movie.get('elo_score', Config.INITIAL_ELO_SCORE))
                 )
                 
                 movie_scores.append({
@@ -875,7 +926,7 @@ class CineSenseRecommender:
         """
         try:
             # Check cache status
-            if self.cache.needs_refill(threshold=0.3):
+            if self.cache.needs_refill(threshold=Config.CACHE_REFILL_THRESHOLD):
                 logger.info("Cache low - refilling from TMDB API...")
                 self._refill_cache(user_id)
             
@@ -1048,7 +1099,7 @@ class CineSenseRecommender:
             filters = {}
             
             # Fetch movies from TMDB
-            pages_needed = (fetch_count // 20) + 1
+            pages_needed = (fetch_count // Config.MOVIES_PER_PAGE) + 1
             movies_fetched = []
             
             for page in range(1, min(pages_needed + 1, Config.MAX_PAGES_PER_FETCH + 1)):

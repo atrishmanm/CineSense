@@ -17,7 +17,7 @@ class PairwiseLearner:
     Similar to modern learning-to-rank algorithms used in recommendation systems
     """
     
-    def __init__(self, k_factor=32, initial_rating=1500):
+    def __init__(self, k_factor=Config.ELO_K_FACTOR, initial_rating=Config.INITIAL_ELO_SCORE):
         """
         Initialize pairwise learner
         
@@ -102,7 +102,7 @@ class BradleyTerryModel:
     More sophisticated than pure ELO
     """
     
-    def __init__(self, n_items, learning_rate=0.1):
+    def __init__(self, n_items, learning_rate=Config.LEARNING_RATE):
         """
         Initialize Bradley-Terry model
         
@@ -238,7 +238,10 @@ class UserPreferenceModel:
         )
         return sorted_movies[:n]
     
-    def has_enough_data(self, min_comparisons=5):
+    # Unified with the DB-backed cold-start gate in the recommender
+    # (Config.MIN_INTERACTIONS_FOR_PERSONALIZATION) so both paths require
+    # the same number of comparisons.
+    def has_enough_data(self, min_comparisons=Config.MIN_INTERACTIONS_FOR_PERSONALIZATION):
         """
         Check if user has made enough comparisons for reliable recommendations
         
@@ -260,8 +263,8 @@ if __name__ == "__main__":
     print("\n1. ELO Rating System:")
     learner = PairwiseLearner()
     
-    # Simulate: Movie A (1500) vs Movie B (1500)
-    rating_a, rating_b = 1500, 1500
+    # Simulate: Movie A vs Movie B (both at the configured starting ELO)
+    rating_a, rating_b = Config.INITIAL_ELO_SCORE, Config.INITIAL_ELO_SCORE
     print(f"Initial: Movie A = {rating_a}, Movie B = {rating_b}")
     
     # A wins

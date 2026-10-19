@@ -18,6 +18,8 @@ from pathlib import Path
 import logging
 from collections import defaultdict
 
+from config import Config
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ class CandidateGenerator:
         
         self.popularity_scores = popularity['popularity_score'].to_dict()
     
-    def get_popular_movies(self, k=100):
+    def get_popular_movies(self, k=Config.INFERENCE_POPULAR_K):
         """Get top-k popular movies"""
         if not hasattr(self, 'popularity_scores'):
             # Fallback: use any movies
@@ -64,12 +66,12 @@ class CandidateGenerator:
         
         return [movie_id for movie_id, score in popular]
     
-    def get_recent_movies(self, k=50):
+    def get_recent_movies(self, k=Config.INFERENCE_RECENT_K):
         """Get recent movies (by movieId as proxy)"""
         # Higher movieIds are typically newer
         return self.movies_df['movieId'].nlargest(k).tolist()
     
-    def get_genre_similar_movies(self, user_history, k=100):
+    def get_genre_similar_movies(self, user_history, k=Config.INFERENCE_GENRE_SIMILAR_K):
         """Get movies similar to user's watch history by genre"""
         if not user_history:
             return []
@@ -108,7 +110,7 @@ class CandidateGenerator:
         
         return [movie_id for movie_id, _ in similar_movies[:k]]
     
-    def get_candidates(self, user_id=None, user_history=None, k=500):
+    def get_candidates(self, user_id=None, user_history=None, k=Config.INFERENCE_CANDIDATE_POOL):
         """
         Get candidate movies for ranking
         
@@ -123,16 +125,16 @@ class CandidateGenerator:
         candidates = set()
         
         # Add popular movies (always good baseline)
-        popular = self.get_popular_movies(k=100)
+        popular = self.get_popular_movies(k=Config.INFERENCE_POPULAR_K)
         candidates.update(popular)
         
         # Add recent movies
-        recent = self.get_recent_movies(k=50)
+        recent = self.get_recent_movies(k=Config.INFERENCE_RECENT_K)
         candidates.update(recent)
         
         # Add genre-similar movies if user history available
         if user_history:
-            similar = self.get_genre_similar_movies(user_history, k=200)
+            similar = self.get_genre_similar_movies(user_history, k=Config.INFERENCE_GENRE_SIMILAR_K)
             candidates.update(similar)
         
         # Convert to list and limit
@@ -164,7 +166,7 @@ class DiversityReranker:
             else:
                 self.movie_genres[movie['movieId']] = set()
     
-    def rerank(self, movie_ids, scores, diversity_weight=0.3, max_per_genre=5):
+    def rerank(self, movie_ids, scores, diversity_weight=Config.DIVERSITY_MMR_LAMBDA, max_per_genre=Config.INFERENCE_MAX_PER_GENRE):
         """
         Rerank recommendations for diversity
         
@@ -280,8 +282,8 @@ class ProductionRecommender:
         """Convert movie indices back to IDs"""
         return self.preprocessor.movie_encoder.inverse_transform(movie_indices)
     
-    def recommend(self, user_id, user_history=None, k=10, 
-                  use_diversity=True, num_candidates=500):
+    def recommend(self, user_id, user_history=None, k=Config.INFERENCE_TOP_K, 
+                  use_diversity=True, num_candidates=Config.INFERENCE_CANDIDATE_POOL):
         """
         Generate recommendations for a user
         
@@ -342,8 +344,8 @@ class ProductionRecommender:
             top_movie_ids, top_scores = self.diversity_reranker.rerank(
                 top_movie_ids,
                 top_scores,
-                diversity_weight=0.3,
-                max_per_genre=3
+                diversity_weight=Config.DIVERSITY_MMR_LAMBDA,
+                max_per_genre=Config.INFERENCE_RECOMMEND_MAX_PER_GENRE
             )
         
         # Step 7: Get top-k final
@@ -371,7 +373,7 @@ class ProductionRecommender:
         
         return recommendations
     
-    def batch_recommend(self, user_ids, k=10):
+    def batch_recommend(self, user_ids, k=Config.INFERENCE_TOP_K):
         """
         Generate recommendations for multiple users
         Useful for batch processing
@@ -462,7 +464,7 @@ if __name__ == '__main__':
         
         # Test recommendation
         user_id = 1
-        recommendations = recommender.recommend(user_id, k=10)
+        recommendations = recommender.recommend(user_id, k=Config.INFERENCE_TOP_K)
         
         logger.info(f"\nTop 10 recommendations for user {user_id}:")
         for rec in recommendations:

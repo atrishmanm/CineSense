@@ -16,6 +16,8 @@ import math
 import random
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from config import Config
+
 
 class ExperimentationEngine:
     """
@@ -71,7 +73,10 @@ class ExperimentationEngine:
             # Simple Poisson/Gaussian tail approximation
             p_val = math.exp(-0.5 * chi2) if chi2 < 700 else 0.0
 
-        srm_detected = p_val < 0.001
+        # SRM alarm threshold. Deliberately much stricter than
+        # Config.AB_SIGNIFICANCE_ALPHA (0.05): SRM flags tracking/engineering
+        # bugs, not treatment effects (A162).
+        srm_detected = p_val < Config.SRM_ALPHA
         return {
             "srm_detected": srm_detected,
             "chi2": round(chi2, 4),

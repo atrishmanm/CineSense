@@ -11,6 +11,8 @@ from dataclasses import dataclass, asdict
 import logging
 from scipy import stats
 
+from config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +28,7 @@ class Experiment:
     end_date: str
     metrics: List[str]  # Metrics to track
     is_active: bool = True
-    min_sample_size: int = 1000  # Minimum samples before statistical test
+    min_sample_size: int = Config.AB_MIN_SAMPLE_SIZE  # Minimum samples before statistical test (A158)
     
     def __post_init__(self):
         """Validate experiment configuration"""
@@ -194,7 +196,7 @@ class ABTestingFramework:
         # Deterministic hash
         hash_input = f"{user_id}:{experiment_id}".encode()
         hash_value = int(hashlib.md5(hash_input).hexdigest(), 16)
-        bucket = (hash_value % 10000) / 10000.0  # 0.0 to 1.0
+        bucket = (hash_value % Config.AB_BUCKET_SCALE) / Config.AB_BUCKET_SCALE  # 0.0 to 1.0 (A159)
         
         # Assign to variant based on traffic allocation
         cumulative = 0.0
@@ -314,30 +316,30 @@ class ABTestingFramework:
                     try:
                         chi2, p_value = stats.chi2_contingency(contingency)[:2]
                         tests['ctr_p_value'] = round(p_value, 4)
-                        tests['ctr_significant'] = p_value < 0.05
+                        tests['ctr_significant'] = p_value < Config.AB_SIGNIFICANCE_ALPHA
                     except Exception as e:
                         logger.warning(f"chi-square CTR test failed: {e}")
                         tests['ctr_p_value'] = None
                 
                 # Test average rating (t-test)
-                if len(control.rating_values) >= 30 and len(metrics.rating_values) >= 30:
+                if len(control.rating_values) >= Config.AB_MIN_GROUP_N and len(metrics.rating_values) >= Config.AB_MIN_GROUP_N:
                     t_stat, p_value = stats.ttest_ind(
                         control.rating_values,
                         metrics.rating_values,
                         equal_var=False
                     )
                     tests['rating_p_value'] = round(p_value, 4)
-                    tests['rating_significant'] = p_value < 0.05
+                    tests['rating_significant'] = p_value < Config.AB_SIGNIFICANCE_ALPHA
                 
                 # Test watch time (t-test)
-                if len(control.watch_times) >= 30 and len(metrics.watch_times) >= 30:
+                if len(control.watch_times) >= Config.AB_MIN_GROUP_N and len(metrics.watch_times) >= Config.AB_MIN_GROUP_N:
                     t_stat, p_value = stats.ttest_ind(
                         control.watch_times,
                         metrics.watch_times,
                         equal_var=False
                     )
                     tests['watch_time_p_value'] = round(p_value, 4)
-                    tests['watch_time_significant'] = p_value < 0.05
+                    tests['watch_time_significant'] = p_value < Config.AB_SIGNIFICANCE_ALPHA
                 
                 results['statistical_tests'][variant] = tests
         

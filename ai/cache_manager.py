@@ -145,7 +145,7 @@ class SlidingWindowCache:
             'avg_access_per_movie': sum(self.access_count.values()) / len(self.cache) if self.cache else 0,
             'hits': self.hits,
             'misses': self.misses,
-            'hit_rate': (self.hits / total * 100) if total > 0 else 0.0,
+            'hit_rate': (self.hits / total * Config.PERCENT_SCALE) if total > 0 else 0.0,
         }
 
 
@@ -220,7 +220,7 @@ class VectorCache:
             'utilization': len(self.vectors) / self.max_size if self.max_size > 0 else 0,
             'hits': self.hits,
             'misses': self.misses,
-            'hit_rate': (self.hits / total * 100) if total > 0 else 0.0,
+            'hit_rate': (self.hits / total * Config.PERCENT_SCALE) if total > 0 else 0.0,
         }
     
     def clear(self):

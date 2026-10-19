@@ -11,6 +11,16 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Metadata normalization divisors/caps for the metadata feature block of the
+# movie embedding (audit A126/A127: previously undocumented magic numbers).
+# Values are preserved exactly; scale semantics documented here.
+_RATING_SCALE = 10.0        # TMDB rating range (0-10) -> rating / 10
+_POPULARITY_SCALE = 10.0    # log1p(popularity) / 10 keeps typical values in [0, 1]
+_YEAR_MIN = 1900.0
+_YEAR_RANGE = 130.0         # years normalized over 1900-2030
+_VOTE_COUNT_SCALE = 15.0    # log1p(vote_count) / 15 dampens blockbusters
+_RUNTIME_CAP = 300.0        # runtimes capped to a 0-300 minute scale
+
 
 class MovieEmbedding:
     """
@@ -61,24 +71,24 @@ class MovieEmbedding:
         
         # Rating (0-10 scale, normalized to 0-1)
         rating = float(movie_data.get('tmdb_rating', 5.0))
-        embedding[metadata_start] = rating / 10.0
+        embedding[metadata_start] = rating / _RATING_SCALE
         
         # Popularity (log-normalized)
         popularity = float(movie_data.get('popularity', 1.0))
-        embedding[metadata_start + 1] = np.log1p(popularity) / 10.0
+        embedding[metadata_start + 1] = np.log1p(popularity) / _POPULARITY_SCALE
         
         # Year (normalized: 1900-2030)
         year = movie_data.get('release_year', 2000)
-        embedding[metadata_start + 2] = (year - 1900) / 130.0
+        embedding[metadata_start + 2] = (year - _YEAR_MIN) / _YEAR_RANGE
         
         # Vote count (log-normalized)
         vote_count = movie_data.get('vote_count', 0)
-        embedding[metadata_start + 3] = np.log1p(vote_count) / 15.0
+        embedding[metadata_start + 3] = np.log1p(vote_count) / _VOTE_COUNT_SCALE
         
         # Runtime (normalized: 0-300 minutes)
         runtime = movie_data.get('runtime', 90)
         if runtime:
-            embedding[metadata_start + 4] = min(runtime, 300) / 300.0
+            embedding[metadata_start + 4] = min(runtime, _RUNTIME_CAP) / _RUNTIME_CAP
         
         return embedding
     
@@ -204,7 +214,7 @@ class UserEmbedding:
         self.embedding = np.zeros(vector_dim)
         self.update_count = 0
     
-    def update_from_choice(self, chosen_movie_embedding, rejected_movie_embedding, learning_rate=0.1):
+    def update_from_choice(self, chosen_movie_embedding, rejected_movie_embedding, learning_rate=Config.LEARNING_RATE):
         """
         Update user embedding based on a pairwise choice
         

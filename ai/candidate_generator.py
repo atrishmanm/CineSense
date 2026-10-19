@@ -75,26 +75,26 @@ class CandidateGenerator:
         
         if strategy == 'mixed':
             # 40% genre-based
-            genre_candidates = self._generate_by_genre(user_id, int(target_count * 0.4))
+            genre_candidates = self._generate_by_genre(user_id, int(target_count * Config.CANDIDATE_FUNNEL_CONTENT_RATIO))
             candidates.extend(genre_candidates)
             candidate_ids.update([_movie_key(m) for m in genre_candidates if _movie_key(m)])
             
             # 30% popularity-based
-            popular_candidates = self._generate_by_popularity(int(target_count * 0.3))
+            popular_candidates = self._generate_by_popularity(int(target_count * Config.CANDIDATE_FUNNEL_POPULARITY_RATIO))
             for movie in popular_candidates:
                 if _movie_key(movie) not in candidate_ids:
                     candidates.append(movie)
                     candidate_ids.add(_movie_key(movie))
             
             # 20% exploration (random discovery)
-            explore_candidates = self._generate_exploration(int(target_count * 0.2))
+            explore_candidates = self._generate_exploration(int(target_count * Config.CANDIDATE_FUNNEL_EXPLORATION_RATIO))
             for movie in explore_candidates:
                 if _movie_key(movie) not in candidate_ids:
                     candidates.append(movie)
                     candidate_ids.add(_movie_key(movie))
             
             # 10% from cache (fast access)
-            cache_candidates = self._generate_from_cache(int(target_count * 0.1))
+            cache_candidates = self._generate_from_cache(int(target_count * Config.CANDIDATE_FUNNEL_CACHE_RATIO))
             for movie in cache_candidates:
                 if _movie_key(movie) not in candidate_ids:
                     candidates.append(movie)
@@ -147,7 +147,7 @@ class CandidateGenerator:
                 data = self.tmdb.discover_movies(
                     with_genres=genre_id,
                     sort_by='vote_average.desc',
-                    vote_count_gte=100,
+                    vote_count_gte=Config.TMDB_MIN_VOTES,
                     page=1
                 )
                 
@@ -172,7 +172,7 @@ class CandidateGenerator:
         candidates = []
         pages_needed = (count // Config.MOVIES_PER_PAGE) + 1  # TMDB standard page size
         
-        for page in range(1, min(pages_needed + 1, 6)):  # Max 5 pages
+        for page in range(1, min(pages_needed + 1, Config.MAX_PAGES_PER_FETCH + 1)):  # Capped at Config.MAX_PAGES_PER_FETCH pages
             try:
                 # Alternate between popular and top-rated
                 if page % 2 == 1:
@@ -208,7 +208,7 @@ class CandidateGenerator:
         all_genres = [g['id'] for g in genres_data['genres']]
         
         # Random sampling
-        pages_needed = (count // 20) + 1
+        pages_needed = (count // Config.MOVIES_PER_PAGE) + 1
         
         for _ in range(pages_needed):
             # Random genre
@@ -231,7 +231,7 @@ class CandidateGenerator:
                     with_genres=genre,
                     sort_by=sort_by,
                     page=page,
-                    vote_count_gte=50
+                    vote_count_gte=Config.TMDB_EXPLORATION_MIN_VOTES
                 )
                 
                 if data and 'results' in data:
@@ -303,19 +303,9 @@ class CandidateGenerator:
         Returns:
             list: Popular genre IDs
         """
-        # Common popular genres
-        popular_genre_ids = [
-            28,   # Action
-            12,   # Adventure
-            16,   # Animation
-            35,   # Comedy
-            18,   # Drama
-            14,   # Fantasy
-            27,   # Horror
-            10749,  # Romance
-            878,  # Science Fiction
-            53    # Thriller
-        ]
+        # Common popular genres (TMDB ids, single-sourced in config;
+        # list() copies because this pool is shuffled in place).
+        popular_genre_ids = list(Config.TMDB_POPULAR_GENRE_IDS)
         
         # Shuffle for variety
         random.shuffle(popular_genre_ids)
