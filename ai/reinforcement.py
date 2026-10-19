@@ -41,6 +41,7 @@ class MultiArmedBandit:
             List of selected arm IDs
         """
         if not available_arms:
+            logger.warning("No arms available for selection; returning empty list")
             return []
         
         # Ensure we don't select more than available
@@ -163,6 +164,7 @@ class UCBBandit:
             List of selected arm IDs
         """
         if not available_arms:
+            logger.warning("No arms available for UCB selection; returning empty list")
             return []
         
         top_k = min(top_k, len(available_arms))
@@ -240,6 +242,7 @@ class ThompsonSampling:
             List of selected arm IDs
         """
         if not available_arms:
+            logger.warning("No arms available for Thompson Sampling; returning empty list")
             return []
         
         top_k = min(top_k, len(available_arms))
@@ -345,6 +348,7 @@ class ContextualBandit:
             List of selected arm IDs
         """
         if not available_arms:
+            logger.warning("No arms available for contextual selection; returning empty list")
             return []
         
         top_k = min(top_k, len(available_arms))

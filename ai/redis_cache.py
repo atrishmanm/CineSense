@@ -12,6 +12,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_redis_outage_logged = False
+
 
 class RedisCache:
     """
@@ -95,8 +97,13 @@ class RedisCache:
         try:
             self.client.ping()
             return True
-        except Exception as e:
-            logger.debug(f"Redis ping failed: {e}")
+        except (redis.RedisError, OSError) as e:
+            global _redis_outage_logged
+            if not _redis_outage_logged:
+                logger.warning("Redis unavailable: %s (further outages logged at debug)", e)
+                _redis_outage_logged = True
+            else:
+                logger.debug(f"Redis ping failed: {e}")
             return False
     
     # ========================================================================

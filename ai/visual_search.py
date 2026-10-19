@@ -144,7 +144,7 @@ class VisualMovieSearch:
                     normalized_movie['poster_path'] = poster_url
                     valid_movies.append(normalized_movie)
                 except Exception as e:
-                    logger.debug(f"Failed to encode poster for {movie.get('title')}: {e}")
+                    logger.warning(f"Failed to encode poster for {movie.get('title')}: {e}")
                     continue
         
         if embeddings:
@@ -332,6 +332,7 @@ class VisualMovieSearch:
             List of visually similar movies
         """
         if not self._ensure_index_ready():
+            logger.warning("Poster index not available; returning empty visual results")
             return []
         
         try:

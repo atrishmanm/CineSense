@@ -1042,17 +1042,10 @@ class CineSenseRecommender:
             
             logger.info(f"Refilling cache: need {fetch_count} movies")
             
-            # Get user's favorite genres if available
+            # Get user's favorite genres if available.
+            # (Removed: the old placeholder try/pass fetched interactions it
+            # never used — dead code; the genre analysis was never wired up.)
             filters = {}
-            if user_id:
-                try:
-                    # Get user's favorite genres
-                    interactions = db.get_user_interactions(user_id, limit=20)
-                    if interactions:
-                        # Placeholder: would analyze genres from interactions
-                        pass
-                except Exception as e:
-                    logger.error(f"Error getting user preferences: {e}")
             
             # Fetch movies from TMDB
             pages_needed = (fetch_count // 20) + 1

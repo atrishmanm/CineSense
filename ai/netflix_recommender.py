@@ -236,6 +236,10 @@ class NetflixRecommender:
             predicted_rating: float (0-5 scale)
         """
         if not self._model_loaded or self.recommender is None:
+            logger.warning(
+                "DL model not loaded; returning default rating 2.5 for user %s / movie %s",
+                user_id, movie_id
+            )
             return 2.5  # Default rating
         
         try:
@@ -244,6 +248,9 @@ class NetflixRecommender:
             movie_indices = self.recommender._encode_movie_ids([movie_id])
             
             if not movie_indices:
+                logger.warning(
+                    "Unknown movie %s; returning default rating 2.5", movie_id
+                )
                 return 2.5
             
             movie_idx = movie_indices[0]
@@ -266,7 +273,7 @@ class NetflixRecommender:
             return round(predicted_rating, 2)
         
         except Exception as e:
-            logger.error(f"Error predicting rating: {e}")
+            logger.error(f"Prediction failed, returning default rating 2.5: {e}")
             return 2.5
     
     def get_top_movies(self, k=50):

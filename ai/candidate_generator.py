@@ -23,8 +23,16 @@ logger = logging.getLogger(__name__)
 
 
 def _movie_key(movie):
-    """Stable identifier for de-duplication across DB ('movie_id') and TMDB ('id') items."""
-    return movie.get('id') or movie.get('movie_id')
+    """Stable identifier for de-duplication across DB ('movie_id') and TMDB ('id') items.
+
+    Entries that have neither id fall back to (tmdb_id, title) so they cannot
+    all collapse onto the same None key (A186) — previously every such row
+    deduplicated to a single survivor.
+    """
+    key = movie.get('id') or movie.get('movie_id')
+    if key is not None:
+        return key
+    return ('no-id', movie.get('tmdb_id'), movie.get('title'))
 
 
 class CandidateGenerator:

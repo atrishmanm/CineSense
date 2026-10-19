@@ -14,6 +14,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_once_logged = set()
+
+
+def _log_once(key, msg, *args):
+    """Log a warning once per process (avoids per-request log spam)."""
+    if key in _once_logged:
+        return
+    _once_logged.add(key)
+    logger.warning(msg, *args)
+
 
 class SemanticMovieSearch:
     def __init__(self, cache_dir='model/semantic_cache'):
@@ -167,7 +177,11 @@ class SemanticMovieSearch:
                     movie['match_type'] = 'semantic'
                     results.append(movie)
         else:
-            # Fallback: full-matrix cosine similarity
+            # Fallback: full-matrix cosine similarity (slower; visible once)
+            _log_once(
+                "faiss_fallback",
+                "FAISS index unavailable; using full-matrix cosine similarity fallback (slower)"
+            )
             cos_scores = util.cos_sim(query_embedding, self.movie_embeddings)[0]
             top_results = torch.topk(cos_scores, k=min(top_k * 2, len(cos_scores)))
             for score, idx in zip(top_results[0], top_results[1]):
@@ -414,7 +428,11 @@ class SemanticMovieSearch:
             logger.info("✓ Cross-encoder loaded: ms-marco-MiniLM-L-6-v2")
             return True
         except Exception as e:
-            logger.warning(f"Cross-encoder unavailable: {e}")
+            _log_once(
+                "cross_encoder_unavailable",
+                "Cross-encoder unavailable; reranking disabled (logged once per process): %s",
+                e,
+            )
             self.cross_encoder = None
             return False
 

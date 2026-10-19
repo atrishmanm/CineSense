@@ -260,15 +260,19 @@ class ProductionRecommender:
     def _encode_movie_ids(self, movie_ids):
         """Convert movie IDs to indices"""
         encoded = []
+        dropped = 0
         
         for movie_id in movie_ids:
             try:
                 idx = self.preprocessor.movie_encoder.transform([movie_id])[0]
                 encoded.append(idx)
-            except Exception as e:
-                # Unknown movie - skip (logged so dropped candidates are visible).
-                logger.debug(f"Skipping unknown movie {movie_id}: {e}")
+            except Exception:
+                # Unknown movie - skip (dropped candidates are counted below).
+                dropped += 1
                 continue
+        
+        if dropped:
+            logger.debug("Dropped %d unknown movie ids out of %d", dropped, len(movie_ids))
         
         return encoded
     
