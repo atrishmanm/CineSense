@@ -20,6 +20,44 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def split_sql_statements(sql_content):
+    """Split a SQL script into statements, honoring DELIMITER changes.
+
+    C302: single source of truth shared by run_schema_file() and
+    run_migration_file(). The two previously disagreed (one matched
+    "line contains the delimiter", which can split a statement whose body
+    contains the delimiter token; the other matched "buffer ends with it").
+    This implementation closes a statement only when the accumulated buffer
+    ends with the current delimiter, skips blank/-- comment lines, and
+    handles DELIMITER // ... DELIMITER ; blocks.
+    """
+    statements = []
+    current_delimiter = ';'
+    buffer = ''
+
+    for raw_line in sql_content.split('\n'):
+        line = raw_line.strip()
+        if not line or line.startswith('--'):
+            continue
+        if line.upper().startswith('DELIMITER'):
+            parts = line.split()
+            if len(parts) > 1:
+                current_delimiter = parts[1]
+            continue
+        buffer += raw_line + '\n'
+        if buffer.rstrip().endswith(current_delimiter):
+            statement = buffer.rstrip()
+            statement = statement[:-len(current_delimiter)].strip()
+            if statement:
+                statements.append(statement)
+            buffer = ''
+
+    tail = buffer.strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 class MigrationRunner:
     """Handles database schema migrations"""
     
@@ -63,29 +101,7 @@ class MigrationRunner:
             try:
                 cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
 
-                statements = []
-                current_delimiter = ';'
-                current_statement = ''
-
-                for raw_line in sql_content.split('\n'):
-                    line = raw_line.strip()
-
-                    if not line or line.startswith('--'):
-                        continue
-
-                    if line.upper().startswith('DELIMITER'):
-                        parts = line.split()
-                        if len(parts) > 1:
-                            current_delimiter = parts[1]
-                        continue
-
-                    current_statement += raw_line + '\n'
-                    if current_statement.rstrip().endswith(current_delimiter):
-                        statement = current_statement.rstrip()
-                        statement = statement[: -len(current_delimiter)].strip()
-                        if statement:
-                            statements.append(statement)
-                        current_statement = ''
+                statements = split_sql_statements(sql_content)
 
                 for statement in statements:
                     cursor.execute(statement)
@@ -193,35 +209,11 @@ class MigrationRunner:
             cursor = self.connection.cursor()
             had_error = False
             try:
-                # Split by delimiter changes and execute statements
-                statements = []
-                current_delimiter = ';'
-                current_statement = ''
-
-                for line in sql_content.split('\n'):
-                    line = line.strip()
-
-                    # Skip comments
-                    if line.startswith('--') or not line:
-                        continue
-
-                    # Check for delimiter change
-                    if line.upper().startswith('DELIMITER'):
-                        parts = line.split()
-                        if len(parts) > 1:
-                            current_delimiter = parts[1]
-                        continue
-
-                    # Accumulate statement
-                    current_statement += line + '\n'
-
-                    # Check if statement is complete
-                    if current_delimiter in line:
-                        # Remove the delimiter
-                        current_statement = current_statement.replace(current_delimiter, ';').strip()
-                        if current_statement and current_statement != ';':
-                            statements.append(current_statement)
-                        current_statement = ''
+                # C302: use the shared splitter (this path previously used a
+                # "delimiter in line" match that disagreed with
+                # run_schema_file and could split on a delimiter token inside
+                # a statement body).
+                statements = split_sql_statements(sql_content)
 
                 # Execute all statements
                 for i, statement in enumerate(statements, 1):

@@ -55,13 +55,55 @@ class DatabaseManager:
                 connection.close()
     
     @contextmanager
-    def get_cursor(self, dictionary=True, buffered=True):
-        """Context manager for database cursors"""
+    def get_cursor(self, dictionary=True, buffered=True, commit=True):
+        """Context manager for database cursors.
+
+        C291: the implicit commit is skipped when the session executed only
+        SELECT statements (no point opening/committing a write transaction for
+        pure reads). Pass commit=False to suppress the commit entirely;
+        write paths behave exactly as before.
+        """
         with self.get_connection() as connection:
             cursor = connection.cursor(dictionary=dictionary, buffered=buffered)
+
+            # Track the statements executed through this cursor so the
+            # post-yield commit decision can tell reads from writes without
+            # changing any call site.
+            executed = None
+            try:
+                original_execute = cursor.execute
+                original_callproc = cursor.callproc
+
+                def _tracked_execute(*args, **kwargs):
+                    if args:
+                        executed.append(str(args[0]))
+                    return original_execute(*args, **kwargs)
+
+                def _tracked_callproc(*args, **kwargs):
+                    executed.append("CALL " + str(args[0] if args else "?"))
+                    return original_callproc(*args, **kwargs)
+
+                cursor.execute = _tracked_execute
+                cursor.callproc = _tracked_callproc
+                executed = []
+            except (AttributeError, TypeError):
+                # Cursor implementation disallows patching (C extension):
+                # fall back to the legacy always-commit behavior.
+                executed = None
+
             try:
                 yield cursor
-                connection.commit()
+                if executed is None:
+                    saw_write = True              # unpatchable cursor: legacy behavior
+                elif executed:
+                    saw_write = any(
+                        not stmt.lstrip().upper().startswith("SELECT")
+                        for stmt in executed
+                    )
+                else:
+                    saw_write = False             # nothing executed, nothing to commit
+                if commit and saw_write:
+                    connection.commit()
             except Error as e:
                 connection.rollback()
                 logger.error(f"Database query error: {e}")
@@ -824,16 +866,44 @@ class DatabaseManager:
     # GENERIC QUERY/EXECUTE (used by social_routes and other modules)
     # ========================================================================
     
-    def query(self, sql, params=None, fetch_all=True):
-        """Execute a SELECT query and return results"""
+    @staticmethod
+    def _reject_multi_statement(sql, allow_multi):
+        """C278: reject multi-statement payloads unless explicitly allowed."""
+        if sql is None:
+            return
+        body = sql.strip()
+        if body.endswith(';'):
+            body = body[:-1]
+        if not allow_multi and ';' in body:
+            raise ValueError(
+                "query()/execute() rejected multi-statement SQL (';' found). "
+                "Statements must be single and fully %s-parameterized; pass "
+                "allow_multi=True only for trusted internal callers."
+            )
+
+    def query(self, sql, params=None, fetch_all=True, allow_multi=False):
+        """Execute a SELECT query and return results.
+
+        WARNING (C278): ``sql`` is passed to MySQL verbatim, so this sink is
+        only safe for constant strings with %s placeholders -- never
+        interpolate user input into ``sql``. As a lightweight guard,
+        multi-statement payloads (a ';' besides a trailing one) raise
+        ValueError unless allow_multi=True is passed explicitly.
+        """
+        self._reject_multi_statement(sql, allow_multi)
         with self.get_cursor() as cursor:
             cursor.execute(sql, params or ())
             if fetch_all:
                 return cursor.fetchall()
             return cursor.fetchone()
     
-    def execute(self, sql, params=None, return_lastrowid=False):
-        """Execute an INSERT/UPDATE/DELETE query"""
+    def execute(self, sql, params=None, return_lastrowid=False, allow_multi=False):
+        """Execute an INSERT/UPDATE/DELETE query.
+
+        Same C278 safety net as query(): verbatim SQL, single statement only
+        unless allow_multi=True is passed explicitly.
+        """
+        self._reject_multi_statement(sql, allow_multi)
         with self.get_cursor() as cursor:
             cursor.execute(sql, params or ())
             if return_lastrowid:

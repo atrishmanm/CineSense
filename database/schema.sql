@@ -203,8 +203,9 @@ CREATE TABLE user_embeddings (
     feature_value DECIMAL(10,6) NOT NULL,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, feature_index),
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    INDEX idx_user_vector (user_id, feature_index)
+    -- C333: INDEX idx_user_vector (user_id, feature_index) removed --
+    -- exact duplicate of the PK above.
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- MOVIE_EMBEDDINGS TABLE (Movie Feature Vectors)
@@ -213,8 +214,9 @@ CREATE TABLE movie_embeddings (
     feature_index INT NOT NULL,
     feature_value DECIMAL(10,6) NOT NULL,
     PRIMARY KEY (movie_id, feature_index),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE,
-    INDEX idx_movie_vector (movie_id, feature_index)
+    -- C334: INDEX idx_movie_vector (movie_id, feature_index) removed --
+    -- exact duplicate of the PK above.
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
@@ -244,8 +246,9 @@ CREATE TABLE movie_keywords (
     FOREIGN KEY (movie_id) REFERENCES movies(movie_id) ON DELETE CASCADE,
     CONSTRAINT chk_relevance_score CHECK (relevance_score BETWEEN 0.0 AND 10.0),
     UNIQUE KEY unique_movie_keyword (movie_id, keyword),
-    INDEX idx_keyword (keyword),
-    INDEX idx_movie_keywords (movie_id)
+    -- C335: INDEX idx_movie_keywords (movie_id) removed -- movie_id is the
+    -- left-most column of unique_movie_keyword, already indexed.
+    INDEX idx_keyword (keyword)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- USER PREFERENCES TABLE (Aggregated preferences for quick access)
@@ -283,7 +286,8 @@ CREATE TABLE cache_stats (
     memory_usage_kb INT DEFAULT 0,
     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_cache_stat (stat_date, cache_type),
-    INDEX idx_stat_date (stat_date),
+    -- C336: INDEX idx_stat_date (stat_date) removed -- stat_date is the
+    -- left-most column of unique_cache_stat, already indexed.
     INDEX idx_timestamp (timestamp DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -914,6 +918,14 @@ BEGIN
     FROM user_interactions
     WHERE user_id = p_user_id;
     
+    -- C310: with no interaction history the SELECTs above leave every
+    -- variable NULL; falling through would overwrite the zeroed row created
+    -- by the after_user_insert trigger with an all-NULL preference row.
+    IF v_total_interactions IS NULL OR v_total_interactions = 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'user has no interactions yet; no preferences to derive';
+    END IF;
+
     INSERT INTO user_preferences (
         user_id, favorite_genre, favorite_actor, favorite_director,
         avg_rating_preference, preferred_decade, total_interactions
@@ -967,9 +979,19 @@ BEGIN
         AND m.tmdb_rating IS NOT NULL
         ORDER BY relevance_score DESC
         LIMIT p_limit;
-    
+
+    -- C312: LIMIT p_limit on a declared cursor relies on stored-program LIMIT
+    -- support (MySQL 5.5+); this is a routine cursor, not a prepared
+    -- statement, so no whitelist-cast workaround is required.
+    -- C311: on any error, drop the temp table before resignaling so the
+    -- session is not left holding a stale temp_recommendations table.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN
+        DROP TEMPORARY TABLE IF EXISTS temp_recommendations;
+        RESIGNAL;
+    END;
+
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
-    
+
     SELECT favorite_genre INTO v_favorite_genre
     FROM user_preferences
     WHERE user_id = p_user_id;
@@ -1127,6 +1149,13 @@ DROP PROCEDURE IF EXISTS get_comparison_pair;
 DELIMITER //
 CREATE PROCEDURE get_comparison_pair(IN p_user_id INT)
 BEGIN
+    -- C317: fail fast for a NULL / non-existent user instead of falling
+    -- through with NULL aggregates and handing out a random pair.
+    IF p_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM users WHERE user_id = p_user_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'unknown user: cannot form a comparison pair';
+    END IF;
+
     DECLARE v_interaction_count INT;
     DECLARE v_favorite_genre VARCHAR(50);
     
@@ -1406,7 +1435,8 @@ DELIMITER ;
 
 CREATE INDEX idx_movies_rating_popularity ON movies(tmdb_rating DESC, popularity DESC);
 CREATE INDEX idx_movies_year_rating ON movies(release_year DESC, tmdb_rating DESC);
-CREATE INDEX idx_user_interactions_user_timestamp ON user_interactions(user_id, timestamp DESC);
+-- C332: duplicate index removed -- identical to the table-level
+-- INDEX idx_user_interactions (user_id, timestamp DESC) on user_interactions.
 CREATE INDEX idx_recommendation_log_user_movie ON recommendation_log(user_id, movie_id);
 
 -- Hot-path indexes added by audit (C325-C330)
@@ -1424,7 +1454,7 @@ ALTER TABLE movies ADD FULLTEXT INDEX ft_title_overview (title, overview);
 -- COMPLETION MESSAGE
 -- ============================================================================
 SELECT 'CineSense comprehensive database schema created successfully!' AS Status;
-SELECT 'Tables: 28 | Views: 24 | Procedures: 24 | Functions: 8 | Triggers: 11 (+8 social feature tables)' AS Summary;
+SELECT 'Tables: 36 | Views: 24 | Procedures: 24 | Functions: 8 | Triggers: 11 (final totals incl. social + extended sections)' AS Summary;
 
 -- ============================================================================
 -- EXTENDED TABLES (AI Features: Semantic Search, Mood, A/B Testing)
@@ -1658,6 +1688,12 @@ CREATE PROCEDURE log_recommendation_feedback(
     IN feedback VARCHAR(50)
 )
 BEGIN
+    -- C319: feedback_type is an ENUM; coerce unknown free-form values to a
+    -- neutral allowed value instead of failing the whole call with a
+    -- truncation error. Unknown feedback never awards the popularity bonus.
+    IF feedback NOT IN ('thumbs_up', 'thumbs_down', 'not_interested', 'watched') THEN
+        SET feedback = 'not_interested';
+    END IF;
     INSERT INTO recommendation_feedback (user_id, movie_id, recommendation_type, feedback_type, created_at)
     VALUES (user_id_param, movie_id_param, rec_type, feedback, NOW());
     IF feedback = 'thumbs_up' THEN
@@ -2002,6 +2038,12 @@ BEGIN
         FROM genres g LEFT JOIN movie_genres mg ON g.genre_id = mg.genre_id
         LEFT JOIN movies m ON mg.movie_id = m.movie_id GROUP BY g.genre_id;
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN
+        -- C311 (same class of bug here): drop the temp table before
+        -- resignaling so the session keeps no stale tmp_genre_audit table.
+        DROP TEMPORARY TABLE IF EXISTS tmp_genre_audit;
+        RESIGNAL;
+    END;
     CREATE TEMPORARY TABLE IF NOT EXISTS tmp_genre_audit (
         genre_id INT, genre_name VARCHAR(50), total_movies INT,
         avg_rating DECIMAL(5,2), win_count INT, loss_count INT, win_rate_pct DECIMAL(5,2));
@@ -2010,6 +2052,11 @@ BEGIN
     audit_loop: LOOP
         FETCH genre_cursor INTO v_genre_id, v_genre_name, v_total_movies, v_avg_rating;
         IF v_done THEN LEAVE audit_loop; END IF;
+        -- C320: reset per iteration -- SELECT ... INTO is a no-op when the
+        -- genre has no genre_win_counts row, which would silently carry the
+        -- previous genre's tallies into this row.
+        SET v_win_count = 0;
+        SET v_loss_count = 0;
         SELECT COALESCE(SUM(win_count), 0), COALESCE(SUM(loss_count), 0) INTO v_win_count, v_loss_count
         FROM genre_win_counts WHERE genre_id = v_genre_id;
         INSERT INTO tmp_genre_audit VALUES (v_genre_id, v_genre_name, v_total_movies, v_avg_rating,
@@ -2135,8 +2182,10 @@ FROM movies;
 DELIMITER //
 
 DROP PROCEDURE IF EXISTS cleanup_temporary_movies //
-CREATE PROCEDURE cleanup_temporary_movies(IN days_old INT)
+CREATE PROCEDURE cleanup_temporary_movies(IN days_old INT, IN force_flag TINYINT)
 BEGIN
+    DECLARE v_candidates INT DEFAULT 0;
+    DECLARE v_total INT DEFAULT 0;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         ROLLBACK;
@@ -2147,6 +2196,19 @@ BEGIN
     IF days_old IS NULL OR days_old < 1 THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'days_old must be >= 1';
+    END IF;
+
+    SELECT COUNT(*) INTO v_candidates
+    FROM movies
+    WHERE is_persisted = FALSE
+      AND last_accessed < DATE_SUB(NOW(), INTERVAL days_old DAY);
+    SELECT COUNT(*) INTO v_total FROM movies;
+
+    -- C322: count candidates first and refuse to cascade-delete a
+    -- suspiciously large slice of the catalog unless clearly forced.
+    IF v_candidates * 5 > v_total AND COALESCE(force_flag, 0) <> 1 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'cleanup would delete > 20% of movies; pass force_flag = 1';
     END IF;
 
     START TRANSACTION;
@@ -2329,7 +2391,10 @@ BEGIN
     -- reset + row-count read consistent. No session sees a partial reset.
     START TRANSACTION;
 
-    -- Bulk operation: reset ELO back to 1500 for under-compared movies
+    -- Bulk operation: reset ELO back to 1500 for under-compared movies.
+    -- C323: comparison_count is intentionally NOT bumped -- a bulk Elo reset
+    -- is not a user comparison, and record_user_interaction /
+    -- update_movie_elo are the sole owners of that counter.
     UPDATE movies
     SET elo_score = 1500
     WHERE comparison_count < p_min_comparisons;
