@@ -2,14 +2,13 @@
 
 > Generated 2026-10-15. Contains EVERYTHING: the 26 findings from the 2026-10-15 manual re-audit (fresh-install, security, integrity, consistency, infra — items N001-N026) **plus the full previous audit** (651 findings: A197 curated ai/, B77 api+, C70 database/, D64 training+benchmarks+inference, E52 tests/frontend/config/docs, F192 machine-verified from scripts/audit_items.txt).
 
-## Status update — 2026-10-19 fix session (verified)
+## Status update — 2026-10-19 fix sessions (Waves 1–3, verified)
 
-Landed on top of the 2026-10-17 "DB audit fixes" commit:
+Landmark commits (in order): "media_type column+view/social tables/procedure fixes" · e0185d3 (Section-1 crash/IDOR fixes + hygiene) · f66ea98 (docs) · ec43a89 + d30f82e (API tails) · 2b7b501 (ai/ robustness) · 67062fc (DB layer) · d544022 (tests/frontend/docs) · 01540c8 (training/benchmarks) · 43f1add (config dedup + N18).
 
-- **Verification:** full test suite `64 passed, 24 skipped`; `pyflakes` 0 findings across every tracked `.py`; import/AST smoke-test clean; `tests/verify_features.py` runs and exits 0.
-- **Section 1 items fixed:** #1 media_type column+view in schema.sql; #2 social tables in schema.sql; #3 migration runner rewritten; #5 lazy-endpoint signature; #6 undefined names; #7 kaggle `__main__` guard; #11 signup validation; #12 cache-monitor key mapping; #13 list ownership checks + GET list endpoint; #16 VectorCache.put overwrite; #20 lazy pairwise metadata.
-- **Hygiene (audit class-wide):** all unused imports removed; `float('-inf')`/`'ncf'`/`'gmf'`/`-off` string-token regressions repaired; dead `ai/_archive/` deleted and stale references in `verify_features.py` (tables, endpoints, features) updated.
-- **Still open (majority of Sections A–E):** broad [robustness] exception-swallowing, config-duplication, API limit/validation hardening, DB view/procedure consistency, benchmark determinism, and session/personalization persistence issues remain tracked below.
+- **Verification:** `pytest -q` → **65 passed, 24 skipped, 0 failed**; `pyflakes` → **0 findings** across every tracked `.py`; `verify_features.py` exits 0; schema splitter regression: 227 balanced statements.
+- **Cleared classes:** Section 1 (N001–N026) complete except N24/N25 (render version pinning / per-worker index — infra decisions); A(a) exception-swallowing — all sites log or narrowed, behavior-preserving; A(b)/A(c) SQL + failure-masking; A(d) hardcoded config duplication — ~55 constants wired (A088–A162); B error-handling/limits/validation/spoofing/authz (B198–B252) — shapes unification (B267–B273) deferred by design; C cursor leaks, procedure math, ENUMs + migration file, index hygiene (C276–C336); D determinism/honest-metrics (D346–D387/D407/D409); E test integrity + requirements/env/docs truth fixes (E410–E458); N18 session persistence — `UserPreferenceModel` warm-starts from the last 100 stored comparisons on cache miss.
+- **Known residuals (tracked, not cleared):** B259–B261 N+1 hot paths (partially mitigated), B267–B273 response-shape unification, C304/C331 (IF-NOT-EXISTS style + LOWER-LIKE plan), C337–C345 naming-normalization (design-level), D371/D376 shared constants, machine-scan classes (empty-fallback/isolated sleeps/select-star heuristics — scanner counts shift with edits; ~172 heuristic hits remain line-based FPs and intent-ambiguous sites).
 
 - Status codes: [bug] wrong behavior · [inconsistency] same concept differs · [robustness] failure hidden/unhandled · [hygiene] dead code · FIXED = repaired in a prior session.
 - Section 1 = new pass (verified this session: pyflakes, pytest run, import smoke-test, live source read).

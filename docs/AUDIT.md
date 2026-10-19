@@ -1,12 +1,15 @@
 # CineSense — Full Codebase Audit (500+ issues)
 
-Status 2026-10-19: hygiene pass landed — pyflakes clean (0 findings, all tracked
-.py), pytest 64 passed / 24 skipped, `ai/_archive/` deleted, token-corruption
-(`float('-inf')` etc.) repaired, verify_features.py refreshed and exits 0.
-Fresh-install + crash-class items (A070/A076, N001–N007, N011–N013, N016) fixed
-in "DB audit fixes" commit + this session; see `AUDIT-FULL-2026-10-15.md`
-header for the full per-item list. The long tail of robustness/consistency
-items below remains open.
+Status 2026-10-19 (Waves 1–3 complete): **65 passed / 24 skipped tests,
+pyflakes 0 findings repo-wide.** Cleared: exception-swallowing (A(a)+log),
+SQL/smestyle bugs, config duplication A088–A162, API hardening B198–B252,
+DB C276–C336 (+ENUM migration file), determinism/metrics D346–D409 tail,
+test/frontend truth E410–E458, session persistence via UserPreferenceModel
+DB warm-start. Residuals (documented in AUDIT-FULL banner): response-shape
+unification (B267–B273), N+1 hot paths partial, naming normalization
+(C337–C345), machine-scan heuristics (~172 line-based hits incl. false
+positives). Commit chain: e0185d3 → f66ea98 → ec43a89 → 2b7b501 → 67062fc →
+d544022 → d30f82e → 01540c8 → 43f1add.
 
 Method: 5 area audits (subagents, file:line verified) + machine scan
 (`scripts/gen_audit.py` → `scripts/audit_items.txt`, 192 items).
