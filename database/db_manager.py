@@ -75,8 +75,8 @@ class DatabaseManager:
                 original_callproc = cursor.callproc
 
                 def _tracked_execute(*args, **kwargs):
-                    if args:
-                        executed.append(str(args[0]))
+                    if args or kwargs:
+                        executed.append(str(args[0]) if args else "<kwargs>")
                     return original_execute(*args, **kwargs)
 
                 def _tracked_callproc(*args, **kwargs):
@@ -312,29 +312,47 @@ class DatabaseManager:
         
         return results
     
-    def get_movies_by_genre_and_type(self, genre_name=None, media_type='all', limit=20, offset=0):
-        """Get movies/TV series by genre and media type"""
+    def get_movies_by_genre_and_type(self, genre_name=None, media_type='all', limit=20, offset=0,
+                                     year_from=None, year_to=None, sort_by='rating'):
+        """Get movies/TV series by genre and media type, with optional
+        year-range filtering and whitelisted sort keys."""
         conditions = ["tmdb_rating IS NOT NULL"]
         params = []
-        
+
         if genre_name and genre_name != 'all':
             conditions.append("FIND_IN_SET(%s, genres) > 0")
             params.append(genre_name)
-        
+
         if media_type == 'movie':
             conditions.append("(media_type = 'movie' OR media_type IS NULL)")
         elif media_type == 'tv':
             conditions.append("media_type = 'tv'")
-        
+
+        if year_from is not None:
+            conditions.append("release_year >= %s")
+            params.append(year_from)
+        if year_to is not None:
+            conditions.append("release_year <= %s")
+            params.append(year_to)
+
+        # Whitelisted sort keys (1:1 with the route's sort_by values)
+        sort_columns = {
+            'popularity':   'popularity DESC',
+            'rating':       'tmdb_rating DESC',
+            'release_date': 'release_year DESC, tmdb_rating DESC',
+            'title':        'title ASC',
+        }
+        order_clause = sort_columns.get(sort_by, 'tmdb_rating DESC')
+
         where_clause = " AND ".join(conditions)
         query = """
             SELECT * FROM movie_details
             WHERE {where_clause}
-            ORDER BY tmdb_rating DESC
+            ORDER BY {order_clause}
             LIMIT %s OFFSET %s
-        """.format(where_clause=where_clause)
+        """.format(where_clause=where_clause, order_clause=order_clause)
         params.extend([limit, offset])
-        
+
         with self.get_cursor() as cursor:
             cursor.execute(query, tuple(params))
             return cursor.fetchall()

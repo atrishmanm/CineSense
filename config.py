@@ -30,11 +30,9 @@ class Config:
         'collation': 'utf8mb4_unicode_ci'
     }
     
-    # Redis Configuration (for caching)
-    # NOTE: app_integrated.py reads REDIS_HOST/PORT/DB directly via os.getenv
-    # (see create_app) and passes them to ai.redis_cache.get_redis_cache().
-    # REDIS_PASSWORD is exposed/consumed via REDIS_CONFIG below; the direct
-    # read in app_integrated.py still omits it (known gap outside this file).
+    # Redis configuration is exposed via the canonical REDIS_CONFIG aggregate
+    # below (host/port/db/password); consumers pass **Config.REDIS_CONFIG to
+    # ai.redis_cache.get_redis_cache().
     REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
     REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
     REDIS_DB = int(os.getenv('REDIS_DB', 0))

@@ -28,14 +28,15 @@ class ExperimentationEngine:
     def bucket_user(user_id: int, experiment_name: str, variants: List[str], salt: str = "cinesense_salt") -> str:
         """
         Deterministic, sticky assignment of user to variant using cryptographic hashing.
-        Guarantees uniform distribution across [0, 99] bucket spectrum.
+        Guarantees uniform distribution across the [0, AB_BUCKET_SCALE - 1] bucket
+        spectrum (scale shared with ai/ab_testing.py so both bucketing systems agree).
         """
         key = f"{salt}:{experiment_name}:{user_id}".encode("utf-8")
         hash_val = int(hashlib.sha256(key).hexdigest()[:8], 16)
-        bucket = hash_val % 100
+        bucket = hash_val % Config.AB_BUCKET_SCALE
 
         # Equal share partitioning
-        step = 100 // len(variants)
+        step = Config.AB_BUCKET_SCALE // len(variants)
         var_idx = min(bucket // step, len(variants) - 1)
         return variants[var_idx]
 

@@ -852,6 +852,9 @@ def get_movies_by_genre():
     try:
         genre = (request.args.get('genre', '') or '').strip()
         media_type = request.args.get('media_type', 'all')
+        year_from = request.args.get('year_from')
+        year_to = request.args.get('year_to')
+        sort_by = request.args.get('sort_by', 'rating')
         try:
             limit = _parse_limit(request.args.get('limit'), default=20)
             offset = _parse_offset(request.args.get('offset'), default=0)
@@ -861,21 +864,42 @@ def get_movies_by_genre():
         if media_type not in VALID_MEDIA_TYPES:
             return jsonify({'error': f'Invalid media_type. Allowed: {sorted(VALID_MEDIA_TYPES)}'}), 400
 
+        valid_sorts = {'popularity', 'rating', 'release_date', 'title'}
+        if sort_by not in valid_sorts:
+            return jsonify({'error': f'Invalid sort_by. Allowed: {sorted(valid_sorts)}'}), 400
+
+        def _parse_year(value):
+            if value is None or value == '':
+                return None
+            year = int(value)
+            if not (1888 <= year <= 2100):
+                raise ValueError
+            return year
+
+        try:
+            year_from = _parse_year(year_from)
+            year_to = _parse_year(year_to)
+        except ValueError:
+            return jsonify({'error': 'Invalid year filter (must be between 1888 and 2100)'}), 400
+
         if len(genre) > 100:
             return jsonify({'error': 'genre is too long'}), 400
 
-        logger.info(f"Getting movies by genre: {genre}, media_type: {media_type}, offset: {offset}")
-        
-        # If no genre specified, get all movies
-        if not genre or genre == 'all' or genre == '':
-            movies = db.get_top_movies(limit=limit, offset=offset, media_type=media_type)
-        else:
-            movies = db.get_movies_by_genre_and_type(
-                genre_name=genre,
-                media_type=media_type,
-                limit=limit,
-                offset=offset
-            )
+        logger.info(
+            f"Getting movies by genre: {genre}, media_type: {media_type}, "
+            f"years: {year_from}-{year_to}, sort: {sort_by}, offset: {offset}"
+        )
+
+        # One code path for all filters (genre may be empty -> all movies)
+        movies = db.get_movies_by_genre_and_type(
+            genre_name=genre or None,
+            media_type=media_type,
+            limit=limit,
+            offset=offset,
+            year_from=year_from,
+            year_to=year_to,
+            sort_by=sort_by,
+        )
         
         return jsonify({
             'success': True,

@@ -61,7 +61,9 @@
             const data = await response.json();
             
             if (response.ok) {
-                const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+                // Only allow same-site relative redirects (open-redirect guard)
+                const raw = new URLSearchParams(window.location.search).get('redirect') || '/';
+                const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
                 window.location.href = redirect;
             } else {
                 errorDiv.textContent = data.error;

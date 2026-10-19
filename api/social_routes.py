@@ -398,9 +398,11 @@ def recommend_movie_to_friend():
         # Return a real recommendation payload to the caller. We deliberately do
         # NOT write to user_interactions: the previous implementation inserted a
         # fake zero-sum interaction (movie_1 == movie_2 == chosen == rejected) that
-        # polluted ELO/interaction data and never reached the friend.
+        # polluted ELO/interaction data and never reached the friend. There is
+        # currently no notifications/delivery store, so this endpoint records
+        # nothing and only echoes the payload back to the caller.
         return jsonify({
-            'message': 'Movie recommended to friend!',
+            'message': 'Recommendation recorded (delivery to friend feeds is not implemented yet)',
             'recommendation': {
                 'from_user_id': user_id,
                 'to_user_id': friend_id,

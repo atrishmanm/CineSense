@@ -329,9 +329,13 @@ class CineSenseRecommender:
             
             # ==============================================================
             # AI LAYER 1: Update ELO scores (pairwise learning)
+            # NOTE: the ELO delta is applied atomically by the stored procedure
+            # record_user_interaction (schema.sql) — the explicit
+            # db.update_movie_elo() call that used to run here applied the SAME
+            # K-factor delta a second time, doubling every rating swing and
+            # inflating comparison_count 2x. Removed (fresh-eyes audit).
             # ==============================================================
-            db.update_movie_elo(chosen_movie_id, rejected_movie_id, k_factor=Config.ELO_K_FACTOR)
-            
+
             # Update user preference model
             user_model = self._get_user_model(user_id)
             user_model.record_preference(chosen_movie_id, rejected_movie_id)
@@ -368,9 +372,10 @@ class CineSenseRecommender:
                 chosen_movie_id,
                 session_id
             )
-            
-            # Update user interaction count
-            db.update_user_interaction_count(user_id)
+
+            # Note: the stored procedure record_user_interaction already
+            # recomputes interaction_count internally (schema.sql) — a second
+            # explicit call here was a redundant COUNT(*) round-trip.
             
             logger.info(f"Processed choice: User {user_id} chose {chosen_movie_id} over {rejected_movie_id}")
             
@@ -409,7 +414,8 @@ class CineSenseRecommender:
             candidate_ids = [m['movie_id'] for m in candidates]
             
             # Use bandit to select two movies
-            selected_ids = self.bandit.select_arm(candidate_ids, top_k=2)
+            selected_ids = self.bandit.select_arm(
+                candidate_ids, top_k=Config.COMPARISON_BATCH_SIZE)
             
             if len(selected_ids) < 2:
                 # Fallback to random (guard against an empty/short candidate pool

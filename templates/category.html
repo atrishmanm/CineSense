@@ -45,23 +45,8 @@
                 </div>
             </div>
 
-            <!-- Language Filter -->
-            <div>
-                <label class="block text-sm font-medium text-gray-300 mb-2">Language</label>
-                <select id="languageFilter" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                    <option value="">All Languages</option>
-                    <option value="en">English</option>
-                    <option value="hi">Hindi</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="ja">Japanese</option>
-                    <option value="ko">Korean</option>
-                    <option value="de">German</option>
-                    <option value="it">Italian</option>
-                    <option value="pt">Portuguese</option>
-                    <option value="zh">Chinese</option>
-                </select>
-            </div>
+            <!-- Language filter removed: the movies table has no language
+                 column, so this control could never actually filter. -->
 
             <!-- Sort By Filter -->
             <div>
@@ -185,7 +170,6 @@
             const mediaType = document.getElementById('mediaTypeFilter').value;
             const yearFrom = document.getElementById('yearFrom').value;
             const yearTo = document.getElementById('yearTo').value;
-            const language = document.getElementById('languageFilter').value;
             const sortBy = document.getElementById('sortByFilter').value;
 
             // Build query parameters
@@ -199,7 +183,6 @@
             if (genre) params.append('genre', genre);
             if (yearFrom) params.append('year_from', yearFrom);
             if (yearTo) params.append('year_to', yearTo);
-            if (language) params.append('language', language);
 
             const response = await fetch(`/api/movie/by-genre?${params}`);
             const data = await response.json();

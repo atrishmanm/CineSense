@@ -167,3 +167,4 @@ ai/cache/*.csv
 
 .ipynb_checkpoints
 *.ipynb
+scratch/

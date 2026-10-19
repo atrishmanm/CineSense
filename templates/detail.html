@@ -451,11 +451,15 @@
                 return;
             }
 
-            list.innerHTML = data.reviews.map(r => `
+            list.innerHTML = data.reviews.map(r => {
+                // Reviews may carry legacy 1..10 or fractional ratings; clamp
+                // the star display to 0..5 so .repeat() can never throw.
+                const stars = Math.max(0, Math.min(5, Math.round(Number(r.rating) || 0)));
+                return `
                 <div class="bg-gray-900/50 rounded-xl p-5 border border-gray-800">
                     <div class="flex items-center justify-between mb-2">
                         <div class="flex items-center gap-3">
-                            <span class="text-yellow-400 font-bold">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+                            <span class="text-yellow-400 font-bold">${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}</span>
                             <span class="text-white font-semibold">${r.username || 'Anonymous'}</span>
                         </div>
                         <span class="text-xs text-gray-500">${new Date(r.created_at).toLocaleDateString()}</span>
@@ -466,7 +470,7 @@
                         👍 Helpful (${r.helpful_count || 0})
                     </button>
                 </div>
-            `).join('');
+            `}).join('');
         } catch (e) {
             document.getElementById('reviews-list').innerHTML = '<p class="text-gray-500">No reviews yet. Be the first!</p>';
         }
@@ -567,7 +571,7 @@
             });
             if (res.ok) {
                 element.classList.add('sent');
-                btn.textContent = 'Sent!';
+                btn.textContent = 'Recorded ✓';
                 btn.classList.remove('bg-indigo-600');
                 btn.classList.add('bg-green-600');
                 element.classList.remove('hover:bg-gray-700');

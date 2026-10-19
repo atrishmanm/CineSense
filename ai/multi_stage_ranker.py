@@ -45,7 +45,7 @@ class MultiStageRanker:
     """
     Two/Three-Stage Recommendation Funnel:
     - Stage 1: Fast multi-channel candidate generation (Vector + Popularity + ELO)
-    - Stage 2: Heavy multi-objective scoring with score calibration and IPS debiasing
+    - Stage 2: Heavy multi-objective scoring with score calibration
     - Stage 3: Cold-item exploration bonus & final business rule deduplication
     """
 
@@ -56,18 +56,11 @@ class MultiStageRanker:
         weight_relevance: float = Config.RECOMMEND_WEIGHT_CONTENT,
         weight_engagement: float = Config.RECOMMEND_WEIGHT_PREFERENCE,
         weight_quality: float = Config.RECOMMEND_WEIGHT_ELO,
-        enable_ips_debiasing: bool = True,
     ) -> None:
         self.w_rel = weight_relevance
         self.w_eng = weight_engagement
         self.w_qual = weight_quality
-        self.enable_ips = enable_ips_debiasing
         self.calibrator = PlattCalibrator()
-
-    @staticmethod
-    def position_propensity(rank_position: int) -> float:
-        """Position examination propensity: P(examined | rank) = 1 / sqrt(rank + 1)."""
-        return 1.0 / math.sqrt(rank_position + 1)
 
     def score_candidate(
         self,

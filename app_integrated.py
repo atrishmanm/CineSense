@@ -3,7 +3,7 @@ CineSense - Fully Integrated CineSense Application with Advanced Social Features
 AI-Based Movie Recommendation Platform with ALL Features
 """
 
-from flask import Flask, render_template, session, request, jsonify
+from flask import Flask, render_template, session, request, jsonify, redirect
 from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from config import Config
@@ -11,7 +11,6 @@ from api.routes import api
 import secrets
 import logging
 from decimal import Decimal
-import os
 import torch
 
 logging.basicConfig(
@@ -220,11 +219,7 @@ def create_app():
     # Redis Cache
     try:
         from ai.redis_cache import get_redis_cache
-        cache = get_redis_cache(
-            host=os.getenv('REDIS_HOST', 'localhost'),
-            port=int(os.getenv('REDIS_PORT', 6379)),
-            db=int(os.getenv('REDIS_DB', 0))
-        )
+        cache = get_redis_cache(**Config.REDIS_CONFIG)
         if cache and cache.is_available():
             app.cache = cache
             logger.info("✓ Redis cache initialized")
@@ -654,7 +649,7 @@ def create_app():
     def compare():
         """Pairwise comparison page"""
         if 'user_id' not in session:
-            return render_template('login.html', redirect='/compare')
+            return redirect(f"/login?redirect={request.path}")
         return render_template('compare.html')
     
     @app.route('/movie/<int:movie_id>')
@@ -676,7 +671,7 @@ def create_app():
     def profile():
         """User profile page"""
         if 'user_id' not in session:
-            return render_template('login.html', redirect='/profile')
+            return redirect(f"/login?redirect={request.path}")
         return render_template('profile.html', logged_in=True, username=session.get('username'))
     
     @app.route('/search')
@@ -720,7 +715,7 @@ def create_app():
     def friends_page():
         """Social features page"""
         if 'user_id' not in session:
-            return render_template('login.html', redirect='/friends')
+            return redirect(f"/login?redirect={request.path}")
         return render_template('friends.html')
     
     @app.route('/favicon.ico')

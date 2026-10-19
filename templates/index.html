@@ -572,6 +572,11 @@
             const response = await fetch(url);
             const data = await response.json();
             let movies = data.movies || [];
+
+            // Advance the offset by the RAW page size so rows dropped by the
+            // dedupe filter (concurrent sections share loadedMovieIds) still
+            // move the cursor forward — otherwise load-more refetches them.
+            const rawCount = movies.length;
             
             // Filter out duplicates and apply filters
             movies = movies.filter(movie => {
@@ -592,7 +597,7 @@
             // Update tracking
             const section = scrollSections[sectionName];
             section.loaded = movies.length;
-            section.offset += movies.length;
+            section.offset += rawCount;
             
             // Show section if it's top-picks (personalized)
             if (sectionName === 'top-picks' && movies.length > 0) {
@@ -670,6 +675,11 @@
         } else {
             // All other sections use top-rated endpoint with different orderings
             url = `/api/movie/top-rated?order_by=${section.order}&limit=10&offset=${section.offset}`;
+            // Keep the media_type filter applied during scroll-load, matching
+            // buildSectionUrl (otherwise sections 2+ mix types back in).
+            if (currentFilters.mediaType !== 'all') {
+                url += `&media_type=${encodeURIComponent(currentFilters.mediaType)}`;
+            }
         }
         
         try {
@@ -691,14 +701,19 @@
                 return true;
             });
 
+            if (rawCount > 0) {
+                section.offset += rawCount;
+                section.loaded += movies.length;
+            }
+
             if (movies.length > 0) {
                 const container = document.getElementById(`${sectionName}-scroll`);
                 movies.forEach(movie => {
                     container.innerHTML += createHorizontalCard(movie);
                 });
-
-                section.loaded += movies.length;
-                section.offset += rawCount;
+            } else if (rawCount > 0) {
+                // Page came back but every row was a duplicate: stream is exhausted.
+                document.getElementById(`${sectionName}-view-all`).classList.remove('hidden');
             }
         } catch (error) {
             console.error(`Error loading more for ${sectionName}:`, error);

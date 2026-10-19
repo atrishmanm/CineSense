@@ -24,6 +24,7 @@ class TMDBFetcher:
         self.image_base_url = Config.TMDB_IMAGE_BASE_URL
         self.session = requests.Session()
         self.timeout = float(os.getenv('TMDB_TIMEOUT_SECONDS', '6'))
+        self._genre_map_cache = None
         retry = Retry(
             total=1,
             connect=1,
@@ -237,13 +238,34 @@ class TMDBFetcher:
             'watch_link': None  # Will be populated later
         }
     
+    def _genre_map(self):
+        """Lazy, cached TMDB genre id -> name map (movie + TV lists merged)."""
+        if self._genre_map_cache is None:
+            mapping = {}
+            for endpoint in ("genre/movie/list", "genre/tv/list"):
+                data = self._make_request(endpoint, {'language': 'en-US'}) or {}
+                for g in data.get('genres', []):
+                    mapping[g['id']] = (g.get('name') or '').strip()
+            self._genre_map_cache = mapping
+        return self._genre_map_cache
+
     def parse_genres(self, movie_json):
         """Extract genres from movie JSON"""
         if 'genres' in movie_json:
-            return movie_json['genres']
+            names = [
+                {'id': g.get('id'), 'name': (g.get('name') or '').strip()}
+                for g in movie_json['genres']
+            ]
+            return [g for g in names if g['name']]
         elif 'genre_ids' in movie_json:
-            # Map genre IDs to names (you'd need to fetch genre list first)
-            return [{'id': gid, 'name': ''} for gid in movie_json['genre_ids']]
+            # Resolve genre_ids against the (cached) TMDB genre list so we
+            # never fabricate blank-named genre rows in the DB.
+            genre_map = self._genre_map()
+            resolved = [
+                {'id': gid, 'name': genre_map.get(gid, '')}
+                for gid in movie_json['genre_ids']
+            ]
+            return [g for g in resolved if g['name']]
         return []
     
     def parse_credits(self, movie_json):

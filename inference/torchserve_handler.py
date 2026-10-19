@@ -42,6 +42,10 @@ class CineSenseRecommenderHandler(BaseHandler):
         self.initialized = False
         self.genre_encoder = None
         self.plot_embeddings = None
+        # Set in initialize() from inspect.signature: True for architectures
+        # whose forward takes (user, movie, content_features, plot), False for
+        # the plain (user, movie, plot) HybridRecommender signer.
+        self._forward_uses_content_features = True
         
     def initialize(self, context):
         """
@@ -85,14 +89,50 @@ class CineSenseRecommenderHandler(BaseHandler):
             # Genre encoder
             with open(f"{model_dir}/genre_encoder.json", 'r') as f:
                 self.genre_encoder = json.load(f)
-            
+
             # Plot embeddings
             self.plot_embeddings = np.load(f"{model_dir}/plot_embeddings.npy")
-            
+
             logger.info("✓ Auxiliary artifacts loaded")
         except Exception as e:
             logger.warning(f"Could not load auxiliary artifacts: {e}")
-        
+
+        # Detect the checkpoint's forward arity ONCE: HybridRecommender's
+        # forward is (user, movie, plot_embeddings) while
+        # AdvancedHybridRecommender also takes content_features. Calling a
+        # 3-arg model with 4 tensors raised TypeError at first inference.
+        import inspect
+        try:
+            forward_params = inspect.signature(self.model.forward).parameters
+            self._forward_uses_content_features = 'content_features' in forward_params
+        except (TypeError, ValueError):
+            self._forward_uses_content_features = True
+
+        # Validate the handler -> model contract at init by running one dummy
+        # forward. This surfaces arity/shape mismatches (e.g. a genre-encoder
+        # vocabulary whose width != the checkpoint's content_feature_dim)
+        # with a clear error instead of failing on the first user request.
+        if self.genre_encoder is not None:
+            content_width = len(self.genre_encoder) + 3  # genres + duration + year + rating
+            probe_args = [
+                torch.LongTensor([0]).to(self.device),
+                torch.LongTensor([0]).to(self.device),
+            ]
+            if self._forward_uses_content_features:
+                probe_args.insert(2, torch.FloatTensor([[0.0] * content_width]).to(self.device))
+            probe_args.append(torch.FloatTensor([[0.0] * PLOT_EMBED_DIM]).to(self.device))
+            try:
+                with torch.no_grad():
+                    self.model(*probe_args)
+            except Exception as e:
+                raise RuntimeError(
+                    "Model/feature contract check failed (content vector width "
+                    f"= {content_width}, plot dim = {PLOT_EMBED_DIM}): {e}. "
+                    "The genre_encoder.json vocabulary size must match the "
+                    "checkpoint's content_feature_dim (training config); "
+                    "regenerate the encoder or export the matching checkpoint."
+                )
+
         self.initialized = True
         logger.info("✓ Handler initialized successfully")
     
@@ -155,12 +195,11 @@ class CineSenseRecommenderHandler(BaseHandler):
             Model predictions
         """
         with torch.no_grad():
-            predictions = self.model(
-                model_input["user_ids"],
-                model_input["movie_ids"],
-                model_input["content_features"],
-                model_input["plot_embeddings"]
-            )
+            args = [model_input["user_ids"], model_input["movie_ids"]]
+            if self._forward_uses_content_features:
+                args.append(model_input["content_features"])
+            args.append(model_input["plot_embeddings"])
+            predictions = self.model(*args)
         
         return predictions
     
@@ -284,7 +323,13 @@ def export_model_for_torchserve(
         if _genre_vocab:
             with open(f"{output_dir}/genre_encoder.json", "w", encoding="utf-8") as fh:
                 json.dump({g: i for i, g in enumerate(_genre_vocab)}, fh, indent=2)
-            print(f"✓ Wrote default genre encoder (MovieLens-32M 20-genre order) to {output_dir}/genre_encoder.json")
+            print(
+                f"✓ Wrote default genre encoder (MovieLens-32M 20-genre order) to {output_dir}/genre_encoder.json\n"
+                f"  NOTE: this yields content vectors {len(_genre_vocab) + 3} wide — the exported "
+                "checkpoint's content_feature_dim MUST match (training/advanced_models_v2.py "
+                "defaults to 55). Verify before packaging, or the handler's init-time contract "
+                "check will fail."
+            )
         else:
             print(
                 "! WARNING: genre_encoder.json not found "

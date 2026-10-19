@@ -14,6 +14,8 @@ import logging
 import base64
 import os
 
+from config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,12 @@ class VisualMovieSearch:
         self.model = None
         self.processor = None
         self.local_only = os.getenv('VISUAL_SEARCH_LOCAL_ONLY', '0').lower() in {'1', 'true', 'yes', 'on'}
-        self.poster_image_base = os.getenv('TMDB_POSTER_BASE_URL', 'https://image.tmdb.org/t/p/w500')
+        # Config.TMDB_IMAGE_BASE_URL ('https://image.tmdb.org/t/p/') owns the
+        # base; this adds the poster size segment, overridable via env.
+        self.poster_image_base = (
+            os.getenv('TMDB_POSTER_BASE_URL')
+            or (Config.TMDB_IMAGE_BASE_URL.rstrip('/') + '/w500')
+        )
         self.max_index_movies = int(os.getenv('VISUAL_SEARCH_INDEX_LIMIT', '500'))
         self.model_load_attempts = 0
         self.max_model_load_attempts = int(os.getenv('VISUAL_SEARCH_MODEL_LOAD_RETRIES', '2'))
