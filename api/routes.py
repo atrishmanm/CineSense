@@ -6,6 +6,7 @@ RESTful API endpoints for the CineSense application
 from flask import Blueprint, request, jsonify, session, current_app
 import csv
 import re
+import threading
 from pathlib import Path
 from database.db_manager import db
 from config import Config
@@ -36,6 +37,12 @@ VALID_MEDIA_TYPES = {'all', 'movie', 'tv'}
 VALID_STRATEGIES = {'mixed', 'genre', 'popularity', 'exploration'}
 VALID_SEARCH_TYPES = {'title', 'storyline', 'semantic', 'hybrid'}
 VALID_WATCHLIST_STATUSES = {'planned', 'watching', 'completed', 'dropped'}
+
+# In-memory dedupe of (user_id, review_id) helpful votes (audit B202/B252 tail).
+# Best-effort, per-process only; capped so it can never grow unbounded.
+HELPFUL_VOTE_DEDUPE_MAX = 10000
+_helpful_votes_seen = set()
+_helpful_votes_lock = threading.Lock()
 
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
@@ -185,6 +192,9 @@ def signup():
 
         if not all([username, email, password]):
             return jsonify({'error': 'Missing required fields'}), 400
+
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
 
         if len(username) < 3:
             return jsonify({'error': 'Username must be at least 3 characters'}), 400
@@ -1018,15 +1028,29 @@ def add_review():
 
 @api.route('/reviews/<int:review_id>/helpful', methods=['POST'])
 def vote_helpful(review_id):
-    """Vote a review as helpful (login required to prevent anonymous inflation)"""
-    if not session.get('user_id'):
+    """Vote a review as helpful (login required; one vote per user per review)"""
+    user_id = session.get('user_id')
+    if not user_id:
         return jsonify({'error': 'Login required'}), 401
+
+    vote_key = (user_id, review_id)
+    with _helpful_votes_lock:
+        if vote_key in _helpful_votes_seen:
+            return jsonify({'error': 'You already voted this review as helpful'}), 409
+        if len(_helpful_votes_seen) >= HELPFUL_VOTE_DEDUPE_MAX:
+            _helpful_votes_seen.clear()
+        _helpful_votes_seen.add(vote_key)
+
     try:
         rows = db.vote_review_helpful(review_id)
     except Exception as e:
+        with _helpful_votes_lock:
+            _helpful_votes_seen.discard(vote_key)
         logger.error(f"Helpful vote error: {e}")
         return jsonify({'error': 'Failed to record vote'}), 500
     if rows <= 0:
+        with _helpful_votes_lock:
+            _helpful_votes_seen.discard(vote_key)
         return jsonify({'error': 'Review not found'}), 404
     return jsonify({'success': True}), 200
 

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 social_bp = Blueprint('social', __name__, url_prefix='/api/social')
 
-MAX_INVITEES_PER_PARTY = 100
+MAX_INVITEES_PER_PARTY = 30
 
 
 def _json_body():
@@ -76,7 +76,7 @@ def _can_edit_list(list_id, user_id):
 
 
 def _parse_scheduled_time(value):
-    """Parse a client supplied scheduled_time into MySQL DATETIME format."""
+    """Parse a client supplied scheduled_time into a datetime (None on invalid input)."""
     if not value or not isinstance(value, str):
         return None
     raw = value.strip().replace('T', ' ')
@@ -86,7 +86,7 @@ def _parse_scheduled_time(value):
         raw = raw[:-1].strip()
     for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
         try:
-            return datetime.strptime(raw, fmt).strftime('%Y-%m-%d %H:%M:%S')
+            return datetime.strptime(raw, fmt)
         except ValueError:
             continue
     return None
@@ -441,6 +441,8 @@ def create_watch_party():
         
         if not movie_id or not scheduled_time:
             return jsonify({'error': 'movie_id and a valid scheduled_time (YYYY-MM-DD HH:MM) required'}), 400
+        if scheduled_time <= datetime.now():
+            return jsonify({'error': 'scheduled_time must be in the future'}), 400
 
         if not isinstance(invitees, list):
             return jsonify({'error': 'invitees must be a list of user IDs'}), 400
@@ -470,7 +472,7 @@ def create_watch_party():
         party_id = db.execute("""
             INSERT INTO watch_parties (host_id, movie_id, scheduled_time, status, created_at)
             VALUES (%s, %s, %s, 'scheduled', NOW())
-        """, (user_id, movie_id, scheduled_time), return_lastrowid=True)
+        """, (user_id, movie_id, scheduled_time.strftime('%Y-%m-%d %H:%M:%S')), return_lastrowid=True)
         
         # Invite friends
         for friend_id in clean_invitees:
@@ -569,13 +571,22 @@ def join_watch_party(party_id):
         if not invite:
             return jsonify({'error': 'You are not invited to this watch party'}), 404
 
-        # Update invitation status
-        db.execute("""
+        # Update invitation status (rowcount tells us if anything actually changed)
+        rows = db.execute("""
             UPDATE watch_party_invites
             SET status = 'accepted'
             WHERE party_id = %s AND user_id = %s AND status <> 'accepted'
         """, (party_id, user_id))
-        
+        if not rows:
+            current = db.query(
+                "SELECT status FROM watch_party_invites WHERE party_id = %s AND user_id = %s",
+                (party_id, user_id),
+                fetch_all=False
+            )
+            if current and current.get('status') == 'accepted':
+                return jsonify({'message': 'Already a member of this watch party'}), 200
+            return jsonify({'error': 'Watch party invitation not found'}), 404
+
         return jsonify({'message': 'Joined watch party!'}), 200
     
     except Exception as e:
@@ -601,11 +612,11 @@ def get_upcoming_watch_parties():
             FROM watch_parties wp
             JOIN movies m ON wp.movie_id = m.movie_id
             JOIN users u ON wp.host_id = u.user_id
-            WHERE wp.host_id = %s
+            WHERE (wp.host_id = %s
                OR wp.party_id IN (
                    SELECT party_id FROM watch_party_invites
                    WHERE user_id = %s AND status = 'accepted'
-               )
+               ))
             AND wp.scheduled_time > NOW()
             ORDER BY wp.scheduled_time ASC
         """, (user_id, user_id))
