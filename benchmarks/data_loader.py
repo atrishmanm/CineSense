@@ -3,7 +3,6 @@ MovieLens-100K Data Loader
 Downloads, parses, and creates reproducible per-user temporal train/val/test splits.
 """
 
-import ssl
 import zipfile
 import urllib.request
 from collections import defaultdict
@@ -15,7 +14,7 @@ import numpy as np
 DATA_DIR = Path(__file__).resolve().parent / "ml100k_data"
 ML100K_URL = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
 
-GENRE_NAMES = [
+GENRE_NAMES = [  # not wired: audit H1.12 (GENRE_NAMES_32M / benchmarks/semantic_benchmark.py have their own lists)
     "unknown", "Action", "Adventure", "Animation", "Children's",
     "Comedy", "Crime", "Documentary", "Drama", "Fantasy",
     "Film-Noir", "Horror", "Musical", "Mystery", "Romance",
@@ -56,11 +55,10 @@ def download_and_extract() -> None:
     try:
         urllib.request.urlretrieve(ML100K_URL, str(zip_path))
     except urllib.error.URLError:
-        # Fallback: skip SSL verification (safe for this known URL)
-        ctx = ssl._create_unverified_context()
-        with urllib.request.urlopen(ML100K_URL, context=ctx) as resp:
-            with open(zip_path, "wb") as out:
-                out.write(resp.read())
+        # wave5 fix (G1.12): don't silently disable TLS. A corporate proxy can be
+        # handled by setting REQUESTS_CA_BUNDLE / SSL_CERT_FILE outside the code;
+        # if neither works the download fails loudly instead of bypassing certs.
+        raise
 
     print("  Extracting ...")
     with zipfile.ZipFile(str(zip_path), "r") as zf:

@@ -36,7 +36,6 @@ import json
 import math
 import random
 import re
-import ssl
 import time
 import urllib.request
 import zipfile
@@ -110,9 +109,12 @@ def find_or_download_32m_dataset() -> Tuple[Path, Path]:
     zip_target = download_dir / "ml-32m.zip"
 
     url = "https://files.grouplens.org/datasets/movielens/ml-32m.zip"
-    ctx = ssl._create_unverified_context()
+    # GroupLens serves a valid CA-signed certificate; use the default SSL
+    # verification (audit G1.12 — previously this called
+    # ssl._create_unverified_context(), which silently disabled TLS
+    # verification for no benefit).
     print(f"  Downloading from {url} ...")
-    with urllib.request.urlopen(url, context=ctx) as resp, open(zip_target, "wb") as out:
+    with urllib.request.urlopen(url) as resp, open(zip_target, "wb") as out:
         out.write(resp.read())
 
     print("  Extracting ml-32m.zip...")
@@ -782,7 +784,8 @@ def main() -> None:
         },
         "beyond_accuracy": {
             "catalog_coverage@10": round(catalog_cov, 4),
-            "novelty_entropy@10": round(mean_novelty, 4),
+            # wave5 fix (H1.6): the metric is self-information (log2 inverse propensity), not entropy — rename to match benchmarks
+            "novelty_self_information@10": round(mean_novelty, 4),
         },
         "training_history": train_history,
     }

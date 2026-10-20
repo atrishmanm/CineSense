@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
+from config import Config
 from ai.recommender import CineSenseRecommender
 
 
@@ -91,13 +92,19 @@ class TestRecommenderScoring:
         item = recs[0]
         assert item["dl_genre_affinity"] == 0.85
 
-        # Check that weights sum to exactly 1.0
-        dl_w = 0.15
-        w_content = (1.0 - dl_w) * 0.50
-        w_pref = (1.0 - dl_w) * 0.30
-        w_elo = (1.0 - dl_w) * 0.20
+        # De-tautologized (audit I1.2): previously these weights were hard
+        # literals on BOTH sides of the comparison (0.85 * ... / 0.15), so
+        # the assertion was pure arithmetic that could never fail and tested
+        # nothing about the code. Now the weights are read from the LIVE
+        # production config that ai/recommender.py:525-533 actually applies
+        # (DL_SCORE_WEIGHT split across RECOMMEND_WEIGHT_*), so this fails
+        # if the shipped weight mix is ever edited to not sum to 1.0.
+        dl_w = float(getattr(Config, "DL_SCORE_WEIGHT", 0.15))
+        w_content = (1.0 - dl_w) * Config.RECOMMEND_WEIGHT_CONTENT
+        w_pref = (1.0 - dl_w) * Config.RECOMMEND_WEIGHT_PREFERENCE
+        w_elo = (1.0 - dl_w) * Config.RECOMMEND_WEIGHT_ELO
         total_w = w_content + w_pref + w_elo + dl_w
-        assert pytest.approx(total_w, rel=1e-6) == 1.0
+        assert pytest.approx(total_w, abs=1e-9) == 1.0
 
 
 class TestMMRDiversityReranking:

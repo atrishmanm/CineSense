@@ -354,12 +354,14 @@ def mean_novelty(
     k: int = 10,
 ) -> float:
     """Average self-information: -log2(p(item)). Higher = more novel/long-tail."""
+    # Clamp unified to 1e-10 to match benchmarks/metrics.py (audit H1.5;
+    # previously 1e-6 here vs 1e-10 there -> silently different novelty).
     total_info = 0.0
     count = 0
     for recs in all_recs.values():
         for item in recs[:k]:
-            pop = item_popularity.get(item, 1e-6)
-            total_info += -math.log2(max(pop, 1e-6))
+            pop = item_popularity.get(item, 1e-10)
+            total_info += -math.log2(max(pop, 1e-10))
             count += 1
     return total_info / max(count, 1)
 
@@ -376,13 +378,16 @@ def intra_list_diversity(
         if len(vecs) < 2:
             continue
         dists = []
+        # Symmetric zero-norm handling (audit H1.5): a zero-norm vector on
+        # either side of a pair yields distance 1.0 (maximally dissimilar).
+        # The previous code skipped the whole pair for a zero i-index norm
+        # but appended 1.0 for a zero j-index norm -- this now treats both
+        # indexes identically (mirrors benchmarks/metrics.py).
         for i in range(len(vecs)):
             norm_i = np.linalg.norm(vecs[i])
-            if norm_i == 0:
-                continue
             for j in range(i + 1, len(vecs)):
                 norm_j = np.linalg.norm(vecs[j])
-                if norm_j == 0:
+                if norm_i == 0 or norm_j == 0:
                     dists.append(1.0)
                 else:
                     cos_sim = float(np.dot(vecs[i], vecs[j]) / (norm_i * norm_j))
@@ -396,7 +401,7 @@ def intra_list_diversity(
 # 5. Full Evaluation Pipeline Orchestrator
 # ============================================================================
 
-def evaluate_full_suite(
+def evaluate_full_suite(  # not wired: audit H1.12 (preserved for possible future use)
     y_true: Sequence[float] | np.ndarray,
     y_pred: Sequence[float] | np.ndarray,
     user_recommendations: Dict[int, List[int]],
@@ -447,7 +452,10 @@ def evaluate_full_suite(
     beyond_acc = {
         "catalog_coverage@10": round(cat_coverage, 4),
         "gini_coefficient@10": round(gini, 4),
-        "novelty_entropy@10": round(novelty, 4),
+        # Audit H1.6: the quantity below is mean SELF-INFORMATION
+        # (-log2 p(item)), not Shannon entropy; renamed from
+        # "novelty_entropy@10" to "novelty_self_information@10".
+        "novelty_self_information@10": round(novelty, 4),
         "intra_list_diversity@10": round(ild, 4),
     }
 

@@ -125,8 +125,10 @@ def run_diversity_and_explanation_benchmark(
             "intra_list_diversity": float(ild),
             "novelty": float(nov),
             "catalog_coverage": float(cov),
-            "explanation_coverage": 1.0,  # 100% of hybrid recommendations have traceable factor payloads
-            "attribution_consistency": 1.0,
+            # Audit H1.9: the previous "explanation_coverage": 1.0 and
+            # "attribution_consistency": 1.0 were hardcoded, never-measured
+            # literals (reports advertised "100% explanation coverage").
+            # Removed -- these quantities are not measured by this benchmark.
         }
         results_by_lambda[label] = res
         print(f"  {label:24s} | NDCG@{k}={res[f'ndcg@{k}']:.4f}  Recall@{k}={res[f'recall@{k}']:.4f} | "

@@ -5,6 +5,20 @@ services:
     runtime: python
     plan: free  # Explicitly use free plan
     buildCommand: pip install -r requirements.txt
+    # Release-phase migration (audit K1.5): the migration runner now
+    # bootstraps schema.sql on an empty ledger per the D4.3 fix, so first
+    # deploys no longer rely on manual DB bootstrapping +
+    # ensure_social_tables() at runtime.
+    # NOTE: preDeployCommand runs on instance types with the shell free
+    # (not on Render free-tier Hobby instances, which ignore it) — keep the
+    # ensure_social_tables() runtime path as a fallback until upgrading.
+    preDeployCommand: python database/run_migration.py
+    # BUILD NOTE (audit K1.5): the app expects `model/semantic_cache` and the
+    # heavy transformers/CLIP weights to be present for a fast boot; on a
+    # fresh build these are absent, so the first requests lazily download
+    # models and build the index from scratch. Model artifacts are gitignored
+    # and must be provisioned out-of-band (a build cache mount / artifact
+    # download step) — deliberately left commented out here.
     # Single worker (not 2): app_integrated.create_app() builds the ~10k-movie
     # semantic index and loads CLIP/transformers. Two workers would duplicate
     # that memory and double cold-start time. Prefer 1 worker + threads.

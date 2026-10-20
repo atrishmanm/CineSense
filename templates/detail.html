@@ -49,7 +49,7 @@
                     
                     <!-- Action Buttons -->
                     <div class="flex gap-3 pt-1">
-                        <a id="watch-btn" href="#" target="_blank" class="px-5 py-2.5 bg-white text-black hover:bg-gray-200 rounded font-bold text-sm md:text-base transition flex items-center shadow-xl">
+                        <a id="watch-btn" href="#" target="_blank" rel="noopener noreferrer" class="px-5 py-2.5 bg-white text-black hover:bg-gray-200 rounded font-bold text-sm md:text-base transition flex items-center shadow-xl">
                             <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path>
                             </svg>
@@ -154,6 +154,9 @@
                 <div id="review-form" class="hidden mb-8 bg-gray-900/50 rounded-xl p-6 border border-gray-800">
                     <div class="mb-4">
                         <label class="block text-sm text-gray-400 mb-2">Rating</label>
+                        <!-- wave5 fix (J1.2): removed the "Title" input — the
+                             backend/DB has no review_title column, so the
+                             field could never be persisted or displayed. -->
                         <div id="star-rating" class="flex gap-1">
                             <button onclick="setRating(1)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
                             <button onclick="setRating(2)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
@@ -161,10 +164,6 @@
                             <button onclick="setRating(4)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
                             <button onclick="setRating(5)" class="star text-3xl text-gray-600 hover:text-yellow-400 transition">★</button>
                         </div>
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-sm text-gray-400 mb-2">Title</label>
-                        <input id="review-title" type="text" maxlength="200" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-indigo-500 focus:outline-none" placeholder="Summarize your experience...">
                     </div>
                     <div class="mb-4">
                         <label class="block text-sm text-gray-400 mb-2">Your Review</label>
@@ -296,8 +295,8 @@
         // Genres
         if (movie.genres) {
             const genres = movie.genres.split(',').map(g => g.trim());
-            document.getElementById('movie-genres').innerHTML = genres.map(genre => 
-                `<span class="px-3 py-1 bg-white/20 backdrop-blur-sm rounded text-sm font-semibold">${genre}</span>`
+            document.getElementById('movie-genres').innerHTML = genres.map(genre =>
+                `<span class="px-3 py-1 bg-white/20 backdrop-blur-sm rounded text-sm font-semibold">${esc(genre)}</span>`
             ).join('');
         }
         
@@ -325,6 +324,9 @@
         }
         
         // AI Explanation
+        // wave5 fix (J1.4, verified): /api/movie/<id> sends no explanation
+        // (backend hardcodes null), so the "Why We Recommend This" panel
+        // stays hidden whenever explanation is absent — never faked here.
         if (explanation) {
             document.getElementById('explanation-text').textContent = explanation;
             document.getElementById('ai-explanation').classList.remove('hidden');
@@ -360,7 +362,7 @@
         return `
             <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
                 <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl group-hover:z-10">
-                    <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy">
+                    <img src="${posterUrl}" alt="${esc(movie.title)}" class="w-full h-full object-cover" loading="lazy">
                     
                     <!-- Hover Overlay -->
                     <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
@@ -374,7 +376,7 @@
                                 </span>
                                 <span class="text-xs text-gray-300">${movie.release_year || ''}</span>
                             </div>
-                            <h3 class="font-bold text-sm line-clamp-2">${movie.title}</h3>
+                            <h3 class="font-bold text-sm line-clamp-2">${esc(movie.title)}</h3>
                         </div>
                     </div>
                 </div>
@@ -402,7 +404,16 @@
     async function toggleWatchlist() {
         try {
             if (inWatchlist) {
-                await fetch(`/api/watchlist/${movieId}`, { method: 'DELETE' });
+                const res = await fetch(`/api/watchlist/${movieId}`, { method: 'DELETE' });
+                // wave5 fix (J1.14): a 401 used to flip local state silently.
+                if (!res.ok) {
+                    if (res.status === 401) {
+                        alert('Please log in to manage your watchlist.');
+                    } else {
+                        alert('Could not update your watchlist.');
+                    }
+                    return;
+                }
                 inWatchlist = false;
                 document.getElementById('watchlist-text').textContent = 'Add to Watchlist';
                 document.getElementById('watchlist-btn').classList.remove('bg-green-600/80');
@@ -418,6 +429,10 @@
                     document.getElementById('watchlist-text').textContent = 'In Watchlist ✓';
                     document.getElementById('watchlist-btn').classList.add('bg-green-600/80');
                     document.getElementById('watchlist-btn').classList.remove('bg-indigo-600/80');
+                } else if (res.status === 401) {
+                    // wave5 fix (J1.14): surface the auth failure instead of
+                    // pretending the add happened.
+                    alert('Please log in to add this movie to your watchlist.');
                 }
             }
         } catch (e) {
@@ -460,14 +475,17 @@
                     <div class="flex items-center justify-between mb-2">
                         <div class="flex items-center gap-3">
                             <span class="text-yellow-400 font-bold">${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}</span>
-                            <span class="text-white font-semibold">${r.username || 'Anonymous'}</span>
+                            <span class="text-white font-semibold">${esc(r.username || 'Anonymous')}</span>
                         </div>
                         <span class="text-xs text-gray-500">${new Date(r.created_at).toLocaleDateString()}</span>
                     </div>
-                    ${r.review_title ? `<h4 class="font-semibold text-white mb-1">${r.review_title}</h4>` : ''}
-                    ${r.review_text ? `<p class="text-gray-300 text-sm">${r.review_text}</p>` : ''}
+                    <!-- wave5 fix (J1.2): review_title is not persisted by the
+                         backend (no such column in movie_reviews) — dropped. -->
+                    ${r.review_text ? `<p class="text-gray-300 text-sm">${esc(r.review_text)}</p>` : ''}
                     <button onclick="markHelpful(${r.review_id})" class="mt-2 text-xs text-gray-500 hover:text-indigo-400 transition">
-                        👍 Helpful (${r.helpful_count || 0})
+                        <!-- wave5 fix (J1.1): DB column is helpful_votes;
+                             r.helpful_count never existed. -->
+                        👍 Helpful (${r.helpful_votes || 0})
                     </button>
                 </div>
             `}).join('');
@@ -484,18 +502,22 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     movie_id: movieId,
-                    rating: selectedRating,
-                    review_title: document.getElementById('review-title').value,
+                    // wave5 fix (J1.3): the UI is a 5-star widget but the
+                    // backend validates ratings 1..10 — map double. (J1.2:
+                    // review_title dropped — backend has no such column.)
+                    rating: selectedRating * 2,
                     review_text: document.getElementById('review-body').value
                 })
             });
             if (res.ok) {
                 document.getElementById('review-form').classList.add('hidden');
-                document.getElementById('review-title').value = '';
                 document.getElementById('review-body').value = '';
                 selectedRating = 0;
                 setRating(0);
                 await loadReviews();
+            } else if (res.status === 401) {
+                // wave5 fix (J1.14): silent 401s gave no feedback.
+                alert('Please log in to write a review.');
             }
         } catch (e) {
             console.error('Review submit error:', e);
@@ -504,7 +526,13 @@
 
     async function markHelpful(reviewId) {
         try {
-            await fetch(`/api/reviews/${reviewId}/helpful`, { method: 'POST' });
+            const res = await fetch(`/api/reviews/${reviewId}/helpful`, { method: 'POST' });
+            // wave5 fix (J1.14): surface auth failures instead of silently
+            // refetching the (unchanged) counts.
+            if (res.status === 401) {
+                alert('Please log in to vote reviews as helpful.');
+                return;
+            }
             await loadReviews();
         } catch (e) { console.error(e); }
     }
@@ -545,7 +573,8 @@
 
         list.innerHTML = friends.map(f => `
             <div onclick="recommendToFriend(${f.friend_id}, this)" class="flex items-center justify-between p-3 bg-gray-800 hover:bg-gray-700 rounded-lg cursor-pointer transition group">
-                <span class="group-hover:text-white transition pointer-events-none">${f.username}</span>
+                <!-- wave5 fix (J2.5): escape friend-supplied username. -->
+                <span class="group-hover:text-white transition pointer-events-none">${esc(f.username)}</span>
                 <button class="px-3 py-1 bg-indigo-600 rounded text-xs font-bold hover:bg-indigo-700 transition share-btn pointer-events-none">
                     Recommend
                 </button>
@@ -604,7 +633,8 @@
 
         list.innerHTML = friends.map(f => `
             <label class="flex items-center justify-between p-2 hover:bg-gray-700/50 rounded cursor-pointer">
-                <span>${f.username}</span>
+                <!-- wave5 fix (J2.5): escape friend-supplied username. -->
+                <span>${esc(f.username)}</span>
                 <input type="checkbox" name="wp-invitee" value="${f.friend_id}" class="form-checkbox h-4 w-4 text-pink-600 rounded border-gray-700 bg-gray-800">
             </label>
         `).join('');

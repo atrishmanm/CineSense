@@ -107,17 +107,32 @@
     let hasMore = true;
     let isLoading = false;
 
-    // Get genre from URL or template variable
-    const genre = "{{ genre | default('', true) | lower }}";
     const categoryName = "{{ category_name | default('', true) }}";
+    // Get genre from URL or template variable.
+    // wave5 fix (J1.19): the three AI/order-driven categories (top-picks /
+    // top-rated / trending) are NOT genres — passing their names into
+    // FIND_IN_SET (genre) matched zero rows, so their View-All pages were
+    // always empty. loadMovies() below routes them to /api/movie/top-rated
+    // with the server-provided order_by (elo_score / tmdb_rating) instead.
+    // Only the two real pseudo-genre categories (action/thriller) get a genre
+    // filter; 'all' stays unfiltered.
+    const categoryOrderCategories = ['top-picks', 'top-rated', 'trending'];
+    const isOrderCategory = categoryOrderCategories.includes(categoryName);
+    const genre = isOrderCategory || categoryName === 'all' || !categoryName
+        ? ''
+        : categoryName.charAt(0).toUpperCase() + categoryName.slice(1).toLowerCase();
+    const orderBy = "{{ order_by | default('popularity', true) }}";
 
     // Function to create movie card HTML
     function createMovieCard(movie) {
         const posterPath = movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '/static/images/placeholder.jpg';
-        const title = movie.title || 'Unknown Title';
+        // wave5 fix (J2.4): title/year come from TMDB ingest — escape them.
+        const title = esc(movie.title || 'Unknown Title');
         const rating = movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A';
-        const year = movie.release_date ? new Date(movie.release_date).getFullYear() : '';
-        const movieId = movie.id || movie.tmdb_id;
+        // wave5 fix (J1.20): movie_details has release_year, not release_date;
+        // and movie_id, not movie.id (tmdb_id kept only as last-resort fallback).
+        const year = movie.release_year || '';
+        const movieId = movie.movie_id || movie.tmdb_id;
 
         return `
             <div class="group cursor-pointer transform transition-all duration-300 hover:scale-105" onclick="window.location.href='/movie/${movieId}'">
@@ -175,27 +190,50 @@
             // Build query parameters
             const params = new URLSearchParams({
                 offset: currentPage * 20,
-                limit: 20,
-                media_type: mediaType,
-                sort_by: sortBy
+                limit: 20
             });
 
-            if (genre) params.append('genre', genre);
-            if (yearFrom) params.append('year_from', yearFrom);
-            if (yearTo) params.append('year_to', yearTo);
+            let fetchUrl;
+            if (isOrderCategory) {
+                // wave5 fix (J1.19): order-driven category → /api/movie/top-rated
+                // with the server-provided order_by (elo_score / tmdb_rating).
+                // Map the user's sort choice where the endpoint supports it;
+                // year filters aren't supported there (they never worked on
+                // this page anyway — the old call returned zero rows).
+                if (sortBy === 'popularity' || sortBy === 'rating') {
+                    params.append('order_by', sortBy === 'rating' ? 'tmdb_rating' : 'popularity');
+                } else {
+                    params.append('order_by', orderBy);
+                }
+                params.append('media_type', mediaType);
+                fetchUrl = `/api/movie/top-rated?${params}`;
+            } else {
+                params.append('media_type', mediaType);
+                params.append('sort_by', sortBy);
+                if (genre) params.append('genre', genre);
+                if (yearFrom) params.append('year_from', yearFrom);
+                if (yearTo) params.append('year_to', yearTo);
+                fetchUrl = `/api/movie/by-genre?${params}`;
+            }
 
-            const response = await fetch(`/api/movie/by-genre?${params}`);
+            const response = await fetch(fetchUrl);
             const data = await response.json();
 
-            if (data.success && data.movies) {
+            if (data.success !== false && data.movies) {
                 const moviesGrid = document.getElementById('moviesGrid');
-                
+
                 data.movies.forEach(movie => {
                     moviesGrid.innerHTML += createMovieCard(movie);
                 });
 
                 currentPage++;
-                hasMore = data.movies.length === 20; // Has more if we got a full page
+                // wave5 fix (J1.19): /api/movie/top-rated supplies has_more;
+                // keep the full-page heuristic for by-genre responses.
+                if (typeof data.has_more === 'boolean') {
+                    hasMore = data.has_more;
+                } else {
+                    hasMore = data.movies.length === 20; // Has more if we got a full page
+                }
                 
                 // Update results count
                 const totalResults = moviesGrid.children.length;
@@ -252,7 +290,10 @@
         document.getElementById('mediaTypeFilter').value = 'all';
         document.getElementById('yearFrom').value = '';
         document.getElementById('yearTo').value = '';
-        document.getElementById('languageFilter').value = '';
+        // wave5 fix (hygiene): the language filter control was removed — guard
+        // the reference so Reset doesn't throw.
+        const langFilter = document.getElementById('languageFilter');
+        if (langFilter) langFilter.value = '';
         document.getElementById('sortByFilter').value = 'popularity';
         loadMovies(true);
     }

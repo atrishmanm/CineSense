@@ -29,9 +29,12 @@ class MoodBasedRecommender:
         self.models_load_attempted = False
         
         # Map moods to movie attributes
+        # wave5 fix (C2.31): genre constants use TMDB canonical names
+        # ('Music' not 'Musical', 'Science Fiction' not 'Sci-Fi') so the
+        # genre lookup actually matches rows in the genres table.
         self.mood_mapping = {
             'happy': {
-                'genres': ['Comedy', 'Animation', 'Family', 'Musical', 'Romance'],
+                'genres': ['Comedy', 'Animation', 'Family', 'Music', 'Romance'],
                 'tone': 'light',
                 'themes': ['friendship', 'love', 'triumph', 'celebration'],
                 'avoid_genres': ['Horror', 'Thriller']
@@ -43,7 +46,7 @@ class MoodBasedRecommender:
                 'avoid_genres': ['Horror', 'Comedy']
             },
             'excited': {
-                'genres': ['Action', 'Adventure', 'Sci-Fi', 'Fantasy'],
+                'genres': ['Action', 'Adventure', 'Science Fiction', 'Fantasy'],
                 'tone': 'intense',
                 'themes': ['hero-journey', 'adventure', 'epic', 'battle'],
                 'avoid_genres': ['Drama', 'Documentary']
@@ -55,7 +58,7 @@ class MoodBasedRecommender:
                 'avoid_genres': ['Horror', 'Thriller', 'Action']
             },
             'bored': {
-                'genres': ['Action', 'Thriller', 'Mystery', 'Sci-Fi', 'Horror'],
+                'genres': ['Action', 'Thriller', 'Mystery', 'Science Fiction', 'Horror'],
                 'tone': 'engaging',
                 'themes': ['twist', 'suspense', 'mystery', 'unpredictable'],
                 'avoid_genres': ['Documentary', 'Drama']
@@ -73,7 +76,7 @@ class MoodBasedRecommender:
                 'avoid_genres': []
             },
             'thoughtful': {
-                'genres': ['Drama', 'Documentary', 'Sci-Fi', 'Mystery'],
+                'genres': ['Drama', 'Documentary', 'Science Fiction', 'Mystery'],
                 'tone': 'cerebral',
                 'themes': ['philosophy', 'existential', 'social-commentary'],
                 'avoid_genres': ['Comedy', 'Action']
@@ -147,7 +150,16 @@ class MoodBasedRecommender:
         
         try:
             # Get emotion predictions
-            emotions = self.emotion_detector(text)[0]
+            result = self.emotion_detector(text)
+            # wave5 fix (C2.29): the top_k=None return shape is
+            # transformers-version dependent: some versions return
+            # [ {label, score}, ... ], others wrap it as [ [ {label, score}, ... ] ].
+            # Detect and unwrap the batch container defensively so the lookup
+            # below works on either shape instead of an IndexError (caught
+            # upstream as a silent fallback).
+            if isinstance(result, list) and result and isinstance(result[0], list):
+                result = result[0]
+            emotions = result if isinstance(result, list) else [result]
             
             # Map emotions to moods
             mood_scores = {}
@@ -156,19 +168,31 @@ class MoodBasedRecommender:
                 label = emotion['label'].lower()
                 score = emotion['score']
                 
-                # Map emotions to our mood categories
+                # Map emotions to our mood categories.
+                # wave5 fix (C2.30): the j-hartmann label set also emits
+                # 'anger', 'disgust' and 'neutral', which previously dropped
+                # their probability mass ('anger' -> 'bored' made angry users
+                # "bored", 'fear' -> 'anxious' got calming movies for users
+                # asking for scary). Now: fear -> scared (enables the Horror/
+                # Thriller 'scared' bucket), anger/frustration -> excited,
+                # disgust -> sad, neutral -> thoughtful. 'scared' was
+                # unreachable from the model branch before this.
                 if label in ['joy', 'happiness']:
                     mood_scores['happy'] = mood_scores.get('happy', 0) + score
                 elif label in ['sadness', 'grief']:
                     mood_scores['sad'] = mood_scores.get('sad', 0) + score
                 elif label in ['anger', 'frustration']:
-                    mood_scores['bored'] = mood_scores.get('bored', 0) + score
+                    mood_scores['excited'] = mood_scores.get('excited', 0) + score
+                elif label in ['disgust']:
+                    mood_scores['sad'] = mood_scores.get('sad', 0) + score
                 elif label in ['fear', 'anxiety']:
-                    mood_scores['anxious'] = mood_scores.get('anxious', 0) + score
+                    mood_scores['scared'] = mood_scores.get('scared', 0) + score
                 elif label in ['surprise', 'excitement']:
                     mood_scores['excited'] = mood_scores.get('excited', 0) + score
                 elif label in ['love', 'affection']:
                     mood_scores['romantic'] = mood_scores.get('romantic', 0) + score
+                elif label in ['neutral']:
+                    mood_scores['thoughtful'] = mood_scores.get('thoughtful', 0) + score
             
             # Normalize scores
             total = sum(mood_scores.values())

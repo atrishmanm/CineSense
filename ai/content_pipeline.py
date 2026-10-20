@@ -12,7 +12,8 @@ from database.db_manager import db
 from tmdb.fetcher import TMDBFetcher
 import logging
 
-logging.basicConfig(level=logging.INFO)
+# wave5 fix (C3.68): module-level logging.basicConfig hijacked the root
+# logger on import; modules now only obtain their own namespaced logger.
 logger = logging.getLogger(__name__)
 
 
@@ -29,19 +30,36 @@ class ContentPipeline:
         self.fetcher = TMDBFetcher()
         self.is_running = False
         self.scheduler_thread = None
+        # wave5 fix (C3.17): job handles so stop()/start() can cancel the
+        # jobs registered on the (global) schedule object instead of letting
+        # duplicates pile up.
+        self._scheduled_jobs = []
         
     def start(self):
         """Start the content pipeline background scheduler"""
-        if self.is_running:
-            logger.warning("Content pipeline already running")
+        if self.is_running and (
+            self.scheduler_thread is None or self.scheduler_thread.is_alive()
+        ):
+            # wave5 fix (C3.17): duplicate start (manual call + startup hook)
+            # used to schedule every job twice and double-fetch; reject it.
+            logger.warning("Content pipeline already running; duplicate start rejected")
             return
         
         self.is_running = True
         
         # Schedule tasks
-        schedule.every().day.at("02:00").do(self.incremental_update)
-        schedule.every(7).days.at("03:00").do(self.scheduled_refresh)
-        schedule.every(6).hours.do(self.fetch_trending)
+        # wave5 fix (C3.17): cancel any jobs left over from a previous start
+        # before re-registering, so stop()/start() does not duplicate them.
+        for job in self._scheduled_jobs:
+            try:
+                schedule.cancel_job(job)
+            except Exception:
+                pass
+        self._scheduled_jobs = [
+            schedule.every().day.at("02:00").do(self.incremental_update),
+            schedule.every(7).days.at("03:00").do(self.scheduled_refresh),
+            schedule.every(6).hours.do(self.fetch_trending),
+        ]
         
         # Run initial fetch
         threading.Thread(target=self.initial_fetch, daemon=True).start()
@@ -55,12 +73,34 @@ class ContentPipeline:
     def stop(self):
         """Stop the content pipeline"""
         self.is_running = False
+        # wave5 fix (C3.17): cancel registered jobs so they do not fire after
+        # stop(), and signal/join the scheduler thread (which previously
+        # stayed alive up to its next 60s tick).
+        for job in self._scheduled_jobs:
+            try:
+                schedule.cancel_job(job)
+            except Exception:
+                pass
+        self._scheduled_jobs = []
+        if (
+            self.scheduler_thread
+            and self.scheduler_thread.is_alive()
+            and self.scheduler_thread is not threading.current_thread()
+        ):
+            self.scheduler_thread.join(timeout=5)
+        self.scheduler_thread = None
         logger.info("Content pipeline stopped")
     
     def _run_scheduler(self):
         """Run the scheduler loop"""
         while self.is_running:
-            schedule.run_pending()
+            # wave5 fix (C3.18): a single escaping exception used to kill the
+            # scheduler thread while is_running stayed True (jobs never ran
+            # again). Log and continue instead.
+            try:
+                schedule.run_pending()
+            except Exception as e:
+                logger.error(f"Scheduler job error (continuing): {e}")
             time.sleep(60)  # Check every minute
     
     # ========================================================================
@@ -226,18 +266,51 @@ class ContentPipeline:
                 return all_movies
             
             elif genre or year:
-                # Discover with filters
+                # Discover with filters.
+                # wave5 fix (C3.22): this branch used to fetch ONLY page 1
+                # (and return [] on any error). Now it walks total_pages
+                # with a small per-run cap (5 pages) and a per-page
+                # try/except so one bad fetch cannot kill the whole fetch.
+                max_pages = 5
+                all_movies = []
+                
                 params = {'page': 1}
                 if genre:
                     params['with_genres'] = genre
                 if year:
                     params['year'] = year
                 
-                results = self.fetcher.discover_movies(**params)
+                try:
+                    results = self.fetcher.discover_movies(**params)
+                except Exception as e:
+                    logger.error(f"Error discovering content (page 1): {e}")
+                    results = None
+                
                 if results and 'results' in results:
                     movies = self._process_and_store_movies(results['results'])
-                    logger.info(f"✅ Found and stored {len(movies)} movies")
-                    return movies
+                    all_movies.extend(movies)
+                    
+                    total_pages = min(results.get('total_pages', 1), max_pages)
+                    
+                    for page in range(2, total_pages + 1):
+                        try:
+                            page_params = dict(params)
+                            page_params['page'] = page
+                            page_results = self.fetcher.discover_movies(**page_params)
+                            if page_results and 'results' in page_results:
+                                page_movies = self._process_and_store_movies(
+                                    page_results['results']
+                                )
+                                all_movies.extend(page_movies)
+                                logger.info(f"📥 Discover page {page}: stored {len(page_movies)} movies")
+                            time.sleep(0.25)  # Rate limiting
+                        except Exception as e:
+                            logger.error(f"Error fetching discover page {page}: {e}")
+                            continue
+                
+                if all_movies:
+                    logger.info(f"✅ Found and stored {len(all_movies)} movies")
+                    return all_movies
             
             return []
             
@@ -262,10 +335,16 @@ class ContentPipeline:
                 pages_needed = (min_movies - current_count) // 20 + 1
                 
                 for page in range(1, min(pages_needed + 1, 26)):  # Max 500 movies per fetch
-                    data = self.fetcher.get_popular_movies(page=page)
-                    if data and 'results' in data:
-                        self._process_and_store_movies(data['results'])
-                    time.sleep(0.25)
+                    # wave5 fix (C3.18): one bad page must not abort the
+                    # bulk replenishment loop; log and keep going.
+                    try:
+                        data = self.fetcher.get_popular_movies(page=page)
+                        if data and 'results' in data:
+                            self._process_and_store_movies(data['results'])
+                        time.sleep(0.25)
+                    except Exception as e:
+                        logger.error(f"Error fetching popular movies page {page}: {e}")
+                        continue
                 
                 logger.info("✅ Inventory replenished")
             else:

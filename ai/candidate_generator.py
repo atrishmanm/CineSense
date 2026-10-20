@@ -18,7 +18,6 @@ from ai.cache_manager import cache_manager
 from database.db_manager import DatabaseManager
 from config import Config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

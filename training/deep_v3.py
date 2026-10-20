@@ -1,8 +1,9 @@
 """CineSense Deep V3 model definition (import-safe copy).
 
-The canonical training script ``kaggle_runner/train_kaggle_t4x2.py`` executes
-training on import (no ``__main__`` guard), so it must only ever be run as a
-script or pushed to Kaggle — never imported. This module contains verbatim
+The canonical training script ``kaggle_runner/train_kaggle_t4x2.py`` is
+import-safe: its full training flow is wrapped in ``main()`` with an
+``if __name__ == "__main__"`` guard, so importing it no longer executes
+training. This module contains verbatim
 copies of its three model classes so checkpoints in ``models/`` can be
 loaded, verified, and served locally:
 

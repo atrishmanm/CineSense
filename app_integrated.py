@@ -10,6 +10,8 @@ from config import Config
 from api.routes import api
 import secrets
 import logging
+import os
+import threading
 from decimal import Decimal
 import torch
 
@@ -194,15 +196,28 @@ def create_app():
     
     # Configuration
     app.config['SECRET_KEY'] = Config.SECRET_KEY
-    app.config['SESSION_TYPE'] = 'filesystem'
-    app.config['JSON_SORT_KEYS'] = False
+    # NOTE: flask-session is NOT installed (not in requirements.txt); these are
+    # Flask's default signed-cookie sessions. A SESSION_TYPE setting here would
+    # be a silent no-op and only misleads readers, so it is deliberately absent.
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file upload
     
     # Set custom JSON provider for Decimal handling
     app.json = DecimalJSONProvider(app)
+    # wave5 fix (A2.5): JSON_SORT_KEYS config key is deprecated in Flask 3;
+    # configure the JSON provider attribute directly instead.
+    app.json.sort_keys = False
     
     # Enable CORS
-    CORS(app)
+    # wave5 fix (A2.2): origins are env-configurable via CORS_ORIGINS
+    # (comma-separated), default '*' preserves the previous blanket CORS(app)
+    # behavior. NOTE: cookie-based authenticated sessions require narrowing
+    # this to trusted origins — a '*' origin cannot be used together with
+    # credentialed cross-origin requests.
+    _cors_origins = [
+        origin.strip() for origin in (os.getenv('CORS_ORIGINS', '*') or '*').split(',')
+        if origin.strip()
+    ] or ['*']
+    CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
     
     # ==========================================================================
     # INITIALIZE AI SYSTEMS
@@ -236,51 +251,53 @@ def create_app():
     logger.info(f"✓ Using device: {device}")
     
     app.ai_systems = {}
+    # wave5 fix (A2.6): serialize heavy model loads; the Procfile serves with
+    # --threads 4, so concurrent first requests could double-load a model.
+    _ai_models_lock = threading.Lock()
 
     def load_ai_models(features=None):
         """Load only the requested AI systems so heavy features do not block unrelated endpoints."""
+        # wave5 fix (C3.4 / audit section C-3): the A/B testing framework is
+        # dead at runtime — nothing ever reads app.ai_systems['ab_test'] — so it
+        # was removed from the default feature list and the loading branch.
         requested_features = features or [
             'chatbot',
             'mood_recommender',
             'trending',
-            'visual_search',
-            'ab_test'
+            'visual_search'
         ]
 
         if isinstance(requested_features, str):
             requested_features = [requested_features]
 
-        for feature_name in requested_features:
-            if feature_name in app.ai_systems:
-                continue
+        with _ai_models_lock:
+            for feature_name in requested_features:
+                if feature_name in app.ai_systems:
+                    continue
 
-            logger.info(f"Loading AI feature: {feature_name}")
+                logger.info(f"Loading AI feature: {feature_name}")
 
-            try:
-                if feature_name == 'chatbot':
-                    from ai.conversational_agent import ConversationalRecommender
-                    app.ai_systems['chatbot'] = ConversationalRecommender(db_manager=db_manager)
-                    logger.info("✓ Conversational agent loaded")
-                elif feature_name == 'mood_recommender':
-                    from ai.mood_detector import MoodBasedRecommender
-                    app.ai_systems['mood_recommender'] = MoodBasedRecommender(db_manager=db_manager)
-                    logger.info("✓ Mood-based recommender loaded")
-                elif feature_name == 'trending':
-                    from ai.trending_detector import TrendingDetector
-                    app.ai_systems['trending'] = TrendingDetector(db_manager=db_manager)
-                    logger.info("✓ Trending detector loaded")
-                elif feature_name == 'visual_search':
-                    from ai.visual_search import VisualMovieSearch
-                    app.ai_systems['visual_search'] = VisualMovieSearch(db_manager=db_manager)
-                    logger.info("✓ Visual search loaded")
-                elif feature_name == 'ab_test':
-                    from ai.ab_testing import ABTestingFramework
-                    app.ai_systems['ab_test'] = ABTestingFramework(db_manager=db_manager)
-                    logger.info("✓ A/B testing framework loaded")
-                else:
-                    logger.warning(f"Unknown AI feature requested: {feature_name}")
-            except Exception as e:
-                logger.warning(f"Could not load {feature_name}: {e}")
+                try:
+                    if feature_name == 'chatbot':
+                        from ai.conversational_agent import ConversationalRecommender
+                        app.ai_systems['chatbot'] = ConversationalRecommender(db_manager=db_manager)
+                        logger.info("✓ Conversational agent loaded")
+                    elif feature_name == 'mood_recommender':
+                        from ai.mood_detector import MoodBasedRecommender
+                        app.ai_systems['mood_recommender'] = MoodBasedRecommender(db_manager=db_manager)
+                        logger.info("✓ Mood-based recommender loaded")
+                    elif feature_name == 'trending':
+                        from ai.trending_detector import TrendingDetector
+                        app.ai_systems['trending'] = TrendingDetector(db_manager=db_manager)
+                        logger.info("✓ Trending detector loaded")
+                    elif feature_name == 'visual_search':
+                        from ai.visual_search import VisualMovieSearch
+                        app.ai_systems['visual_search'] = VisualMovieSearch(db_manager=db_manager)
+                        logger.info("✓ Visual search loaded")
+                    else:
+                        logger.warning(f"Unknown AI feature requested: {feature_name}")
+                except Exception as e:
+                    logger.warning(f"Could not load {feature_name}: {e}")
     
     # Pre-initialize semantic search engine (heavy model load - do it at startup, not during request)
     try:
@@ -335,11 +352,16 @@ def create_app():
     
     # Start content pipeline for continuous content ingestion
     try:
-        from ai.content_pipeline import start_content_pipeline
-        import threading
-        pipeline_thread = threading.Thread(target=start_content_pipeline, daemon=True)
-        pipeline_thread.start()
-        logger.info("✓ Content pipeline started")
+        # wave5 fix (A2.1): under Flask's dev reloader, create_app() runs in
+        # BOTH the reloader parent and the child; only the child (the process
+        # that actually serves) should start pipeline threads/jobs.
+        if Config.DEBUG and 'WERKZEUG_RUN_MAIN' not in os.environ:
+            logger.info("Content pipeline skipped: reloader parent process (runs in worker only)")
+        else:
+            from ai.content_pipeline import start_content_pipeline
+            pipeline_thread = threading.Thread(target=start_content_pipeline, daemon=True)
+            pipeline_thread.start()
+            logger.info("✓ Content pipeline started")
     except Exception as e:
         logger.warning(f"Content pipeline not started: {e}")
     
@@ -350,107 +372,114 @@ def create_app():
     @app.route('/api/chat', methods=['POST'])
     def chat():
         """Conversational movie recommendations powered by semantic search"""
-        load_ai_models('chatbot')
+        # wave5 fixes (A1.3, A1.4): the handler is app-level, so an unexpected
+        # error used to render the HTML 500 page — every failure now returns a
+        # JSON error. The load_ai_models('chatbot') call was removed: nothing
+        # in the handler reads app.ai_systems['chatbot'] (logic is inlined), so
+        # it only added a blocking first-request model load.
+        try:
+            data = _json_body()
+            # Never trust a client-supplied user_id; bind personalization to the session.
+            user_id = session.get('user_id')
+            message = (data.get('message') or '').strip()
 
-        data = _json_body()
-        # Never trust a client-supplied user_id; bind personalization to the session.
-        user_id = session.get('user_id')
-        message = (data.get('message') or '').strip()
+            if not message:
+                return jsonify({'error': 'Message required'}), 400
 
-        if not message:
-            return jsonify({'error': 'Message required'}), 400
+            ml = message.lower()
 
-        ml = message.lower()
+            # --- 1. Pure greetings ---
+            greeting_words = ['hi', 'hello', 'hey', 'howdy', 'sup', 'yo']
+            if len(message.split()) <= 3 and any(ml.startswith(g) for g in greeting_words):
+                return jsonify({
+                    'response': (
+                        "Hey there! I'm your movie assistant.\n\n"
+                        "Try asking me:\n"
+                        "- \"Indian spy thriller\" - story-based search\n"
+                        "- \"I'm feeling happy\" - mood recommendations\n"
+                        "- \"Trending movies\" - what's popular now\n"
+                        "- \"Custom officer show india\" - find specific content\n\n"
+                        "What would you like to watch?"
+                    ),
+                    'recommendations': [],
+                    'type': 'greeting'
+                })
 
-        # --- 1. Pure greetings ---
-        greeting_words = ['hi', 'hello', 'hey', 'howdy', 'sup', 'yo']
-        if len(message.split()) <= 3 and any(ml.startswith(g) for g in greeting_words):
-            return jsonify({
-                'response': (
-                    "Hey there! I'm your movie assistant.\n\n"
-                    "Try asking me:\n"
-                    "- \"Indian spy thriller\" - story-based search\n"
-                    "- \"I'm feeling happy\" - mood recommendations\n"
-                    "- \"Trending movies\" - what's popular now\n"
-                    "- \"Custom officer show india\" - find specific content\n\n"
-                    "What would you like to watch?"
-                ),
-                'recommendations': [],
-                'type': 'greeting'
-            })
+            # --- 2. Thanks / Goodbye ---
+            if any(w in ml for w in ['thank', 'thanks', 'bye', 'cya', 'goodbye']) and len(message.split()) <= 5:
+                return jsonify({
+                    'response': "You're welcome! Enjoy watching! Come back anytime.",
+                    'recommendations': [],
+                    'type': 'chat'
+                })
 
-        # --- 2. Thanks / Goodbye ---
-        if any(w in ml for w in ['thank', 'thanks', 'bye', 'cya', 'goodbye']) and len(message.split()) <= 5:
-            return jsonify({
-                'response': "You're welcome! Enjoy watching! Come back anytime.",
-                'recommendations': [],
-                'type': 'chat'
-            })
+            # --- 3. Trending / Popular ---
+            if any(w in ml for w in ['trending', 'popular', 'viral', "what's hot", 'new releases', 'top movies']):
+                movies = db_manager.get_top_movies(limit=CHAT_RECOMMENDATION_LIMIT, order_by='popularity')
+                return jsonify({
+                    'response': "Here are the most popular movies and shows right now:",
+                    'recommendations': movies,
+                    'type': 'trending'
+                })
 
-        # --- 3. Trending / Popular ---
-        if any(w in ml for w in ['trending', 'popular', 'viral', "what's hot", 'new releases', 'top movies']):
-            movies = db_manager.get_top_movies(limit=CHAT_RECOMMENDATION_LIMIT, order_by='popularity')
-            return jsonify({
-                'response': "Here are the most popular movies and shows right now:",
-                'recommendations': movies,
-                'type': 'trending'
-            })
+            # --- 4. Short mood-only queries (<=5 words) ---
+            mood_keywords = {
+                'happy':      ['happy', 'cheerful', 'fun', 'uplifting', 'feel good', 'joy', 'laugh'],
+                'sad':        ['sad', 'cry', 'emotional', 'depressed', 'melancholic'],
+                'excited':    ['excited', 'pumped', 'adrenaline', 'adventure'],
+                'scared':     ['scared', 'scary', 'horror', 'creepy', 'spooky'],
+                'romantic':   ['romantic', 'romance', 'love', 'date night'],
+                'bored':      ['bored'],
+                'thoughtful': ['thoughtful', 'deep', 'philosophical', 'documentary'],
+            }
+            detected_mood = None
+            if len(message.split()) <= 5:
+                for mood, kvs in mood_keywords.items():
+                    if any(kw in ml for kw in kvs):
+                        detected_mood = mood
+                        break
 
-        # --- 4. Short mood-only queries (<=5 words) ---
-        mood_keywords = {
-            'happy':      ['happy', 'cheerful', 'fun', 'uplifting', 'feel good', 'joy', 'laugh'],
-            'sad':        ['sad', 'cry', 'emotional', 'depressed', 'melancholic'],
-            'excited':    ['excited', 'pumped', 'adrenaline', 'adventure'],
-            'scared':     ['scared', 'scary', 'horror', 'creepy', 'spooky'],
-            'romantic':   ['romantic', 'romance', 'love', 'date night'],
-            'bored':      ['bored'],
-            'thoughtful': ['thoughtful', 'deep', 'philosophical', 'documentary'],
-        }
-        detected_mood = None
-        if len(message.split()) <= 5:
-            for mood, kvs in mood_keywords.items():
-                if any(kw in ml for kw in kvs):
-                    detected_mood = mood
-                    break
-
-        if detected_mood:
-            try:
-                if 'mood_recommender' in app.ai_systems:
-                    result = app.ai_systems['mood_recommender'].get_mood_recommendations(
-                        user_id=user_id, mood_input=message, top_k=CHAT_RECOMMENDATION_LIMIT
-                    )
-                else:
-                    result = _fallback_mood(message, db_manager)
-                movies = result.get('movies', [])
-                if movies:
-                    return jsonify({
-                        'response': result.get('explanation', f"Here are some {detected_mood} picks:"),
-                        'recommendations': movies,
-                        'mood': detected_mood,
-                        'type': 'mood'
-                    })
-            except Exception as e:
-                logger.warning(f"Mood handler in chat failed: {e}")
-
-        # --- 5. Semantic search — handles ALL content queries ---
-        if app.semantic_search:
-            try:
-                results = app.semantic_search.hybrid_search(message, top_k=CHAT_RECOMMENDATION_LIMIT)
-                if results:
-                    for r in results:
-                        r['search_score'] = round(
-                            r.get('final_score', r.get('relevance_score', 0)) * 100, 1
+            if detected_mood:
+                try:
+                    if 'mood_recommender' in app.ai_systems:
+                        result = app.ai_systems['mood_recommender'].get_mood_recommendations(
+                            user_id=user_id, mood_input=message, top_k=CHAT_RECOMMENDATION_LIMIT
                         )
-                    return jsonify({
-                        'response': _generate_chat_response(message, results),
-                        'recommendations': results,
-                        'type': 'semantic'
-                    })
-            except Exception as e:
-                logger.warning(f"Semantic search in chat failed: {e}")
+                    else:
+                        result = _fallback_mood(message, db_manager)
+                    movies = result.get('movies', [])
+                    if movies:
+                        return jsonify({
+                            'response': result.get('explanation', f"Here are some {detected_mood} picks:"),
+                            'recommendations': movies,
+                            'mood': detected_mood,
+                            'type': 'mood'
+                        })
+                except Exception as e:
+                    logger.warning(f"Mood handler in chat failed: {e}")
 
-        # --- 6. Keyword fallback ---
-        return jsonify(_fallback_chat(message, db_manager))
+            # --- 5. Semantic search — handles ALL content queries ---
+            if app.semantic_search:
+                try:
+                    results = app.semantic_search.hybrid_search(message, top_k=CHAT_RECOMMENDATION_LIMIT)
+                    if results:
+                        for r in results:
+                            r['search_score'] = round(
+                                r.get('final_score', r.get('relevance_score', 0)) * 100, 1
+                            )
+                        return jsonify({
+                            'response': _generate_chat_response(message, results),
+                            'recommendations': results,
+                            'type': 'semantic'
+                        })
+                except Exception as e:
+                    logger.warning(f"Semantic search in chat failed: {e}")
+
+            # --- 6. Keyword fallback ---
+            return jsonify(_fallback_chat(message, db_manager))
+        except Exception as e:
+            logger.error(f"Chat error: {e}")
+            return jsonify({'error': 'Chat temporarily unavailable', 'recommendations': []}), 500
     
     @app.route('/api/mood-recommendations', methods=['POST'])
     def mood_recommendations():
@@ -480,7 +509,11 @@ def create_app():
                 return jsonify(_fallback_mood(mood_input, db_manager))
         except Exception as e:
             logger.error(f"Mood recommendation error: {e}")
-            return jsonify(_fallback_mood(mood_input, db_manager))
+            # wave5 fix (A1.2): keep the 200 fallback payload but mark the
+            # degradation with an additive flag so clients can detect outages.
+            fallback_payload = _fallback_mood(mood_input, db_manager)
+            fallback_payload['fallback'] = True
+            return jsonify(fallback_payload)
     
     @app.route('/api/trending')
     def get_trending():
@@ -630,7 +663,10 @@ def create_app():
             return jsonify({'error': 'Cache not available'}), 503
         
         try:
-            stats = app.cache.get_cache_stats()
+            # wave5 fix (A1.1): RedisCache exposes get_stats(), not
+            # get_cache_stats() — the old call raised AttributeError and the
+            # endpoint 500'd whenever Redis was available.
+            stats = app.cache.get_stats()
             return jsonify(stats)
         except Exception as e:
             logger.error(f"Cache stats error: {e}")
@@ -672,7 +708,9 @@ def create_app():
         """User profile page"""
         if 'user_id' not in session:
             return redirect(f"/login?redirect={request.path}")
-        return render_template('profile.html', logged_in=True, username=session.get('username'))
+        # wave5 fix (A2.8): the context processor already provides
+        # logged_in/username; the explicit duplicates are removed.
+        return render_template('profile.html')
     
     @app.route('/search')
     def search():
@@ -801,7 +839,8 @@ def main():
     print("Press Ctrl+C to stop the server\n")
     
     app.run(
-        host='0.0.0.0',
+        # wave5 fix (A2.3): bind address now configurable via HOST env.
+        host=os.getenv('HOST', '0.0.0.0'),
         port=Config.PORT,
         debug=Config.DEBUG,
         use_reloader=True

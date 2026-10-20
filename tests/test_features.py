@@ -15,6 +15,10 @@ import requests
 BASE_URL = "http://localhost:5000"
 PROBE_TIMEOUT = 2.0
 
+# Audit I1.3: tag this module so `pytest -m live` / `-m "not live"` filters
+# work without PytestUnknownMarkWarning (marker registered in tests/conftest.py).
+pytestmark = pytest.mark.live
+
 
 def _server_up(timeout=PROBE_TIMEOUT) -> bool:
     """Probe the server with a short timeout (never at import time)."""

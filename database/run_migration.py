@@ -16,8 +16,16 @@ if PROJECT_ROOT not in sys.path:
 
 from config import Config
 
-logging.basicConfig(level=logging.INFO)
+# wave5 fix (C3.68): module-level logging.basicConfig hijacked the root
+# logger on import; modules now only obtain their own namespaced logger.
 logger = logging.getLogger(__name__)
+
+# wave5 fix (D4.5): MySQL error numbers whose text means "the object (or
+# key/column under that name) already exists" and is safe to skip:
+#   1050 ER_TABLE_EXISTS_ERROR, 1060 ER_DUP_FIELDNAME, 1061 ER_DUP_KEYNAME,
+#   1307 PROCEDURE/FUNCTION already exists, 1359 TRIGGER already exists,
+#   1064 with 'already exists'?? -- no: text match is handled separately.
+_ALREADY_EXISTS_ERRNOS = {1050, 1060, 1061, 1307, 1359}
 
 
 def split_sql_statements(sql_content):
@@ -231,8 +239,18 @@ class MigrationRunner:
                         cursor.execute(statement)
 
                     except mysql.connector.Error as err:
-                        # Some errors are expected (like IF NOT EXISTS when already exists)
-                        if 'already exists' in str(err).lower() or 'duplicate' in str(err).lower():
+                        # wave5 fix (D4.5): the old substring skip matched ANY
+                        # 'duplicate' error, so real "Duplicate entry" data
+                        # errors were silently skipped and the migration was
+                        # then committed + marked applied. Skip only genuine
+                        # already-exists DDL outcomes (by errno, with the
+                        # phrasing matched as a fallback).
+                        err_text = str(err).lower()
+                        already_exists = (
+                            err.errno in _ALREADY_EXISTS_ERRNOS
+                            or 'already exists' in err_text
+                        )
+                        if already_exists:
                             logger.warning(f"Statement {i} skipped (already exists): {str(err)[:100]}")
                         else:
                             logger.error(f"Error executing statement {i}: {err}")
@@ -261,6 +279,30 @@ class MigrationRunner:
             self.connection.rollback()
             return False
     
+    def movies_table_exists(self):
+        """True when the authoritative base table exists in the target DB.
+
+        wave5 fix (D4.3): the runner used migrations' presence alone to decide
+        whether schema.sql had been applied -- on a fresh DB with >=1
+        migrations/ file, the ALTERs ran against missing base tables and the
+        whole run failed.
+        """
+        try:
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = 'movies'
+                """)
+                count = cursor.fetchone()[0]
+            finally:
+                cursor.close()
+            return count > 0
+        except mysql.connector.Error as err:
+            logger.error(f"Could not check for movies table: {err}")
+            return False
+
     def run_all_migrations(self):
         """Run all pending migrations"""
         try:
@@ -284,6 +326,15 @@ class MigrationRunner:
                 return self.run_schema_file(schema_path)
             
             logger.info(f"Found {len(migration_files)} migration file(s)")
+
+            # wave5 fix (D4.3): fresh-DB bootstrap -- with migrations pending
+            # but no base schema present, apply schema.sql FIRST so the
+            # migrations run against real tables instead of failing outright.
+            if not self.movies_table_exists():
+                logger.info("Base 'movies' table absent (fresh DB): applying authoritative schema.sql before migrations")
+                if not self.run_schema_file(schema_path):
+                    logger.error("Failed to bootstrap schema.sql; aborting migrations")
+                    return False
             
             # Run each migration
             for migration_file in migration_files:

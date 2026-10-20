@@ -13,6 +13,13 @@ Evaluates on real MovieLens-100K data across:
 3. Top-N Ranking metrics (@5, @10, @20 Precision, Recall, NDCG, MAP, Hit Rate, MRR)
 4. Catalog & Beyond-Accuracy metrics (Catalog Coverage, Gini Index, Novelty/Self-Information, Intra-List Diversity)
 
+Split protocol (audit H1.4): this runner uses a per-user chronological 80/10/10
+split on ALL of MovieLens-100K (`create_splits(test_ratio=0.10, val_ratio=0.10)`).
+Its numbers are NOT comparable with `run_all_benchmarks.py` (70/10/20 split) or
+`run_32m_benchmarks.py` (75/10/15 on a 500K ML-32M reservoir sample): the three
+harnesses use different splits, catalogs and popularity definitions, so their
+identically-named metrics sit on different scales.
+
 Tested Models:
 - Model A: Global Popularity & Mean Baseline
 - Model B: User-Item Biased Matrix Factorization (Latent Factor Model)
@@ -453,7 +460,12 @@ def run_comprehensive_evaluation():
         beyond = {
             "catalog_coverage@10": round(cov_10, 4),
             "gini_coefficient@10": round(gini_10, 4),
-            "novelty_entropy@10": round(novelty_10, 4),
+            # Audit H1.6: mean_novelty() computes mean SELF-INFORMATION
+            # (-log2 p(item)), not entropy. Renamed from the legacy key
+            # "novelty_entropy@10" — older stored artifacts
+            # (results/all_metrics.json, comprehensive_evaluation_report.md)
+            # still carry the old name.
+            "novelty_self_information@10": round(novelty_10, 4),
             "intra_list_diversity@10": round(ild_10, 4),
         }
 
@@ -521,11 +533,15 @@ def run_comprehensive_evaluation():
             f.write(f"| **{name}** | **{k['ndcg@10']:.4f}** | {k['precision@10']:.4f} | {k['recall@10']:.4f} | **{k['hit_rate@10']:.4f}** | {k['map@10']:.4f} | {k['mrr@10']:.4f} | {k['ndcg@20']:.4f} | {k['recall@20']:.4f} |\n")
 
         f.write("\n## 4. Catalog Coverage & Beyond-Accuracy Diversity\n\n")
-        f.write("| Model | Catalog Coverage@10 (^) | Gini Coefficient (v) | Novelty Entropy (^) | Intra-List Diversity (ILD) |\n")
+        # Audit H1.6: key and column renamed -- the metric is mean
+        # self-information (-log2 p(item)), not entropy. The writer below now
+        # reads the renamed key; the old "Novelty Entropy" header/lookup was
+        # left pointing at the removed dict key and would KeyError.
+        f.write("| Model | Catalog Coverage@10 (^) | Gini Coefficient (v) | Novelty (Self-Information) (^) | Intra-List Diversity (ILD) |\n")
         f.write("| :--- | :---: | :---: | :---: | :---: |\n")
         for name, data in all_results.items():
             b = data["beyond_accuracy"]
-            f.write(f"| **{name}** | **{b['catalog_coverage@10']:.4f}** | {b['gini_coefficient@10']:.4f} | {b['novelty_entropy@10']:.4f} | {b['intra_list_diversity@10']:.4f} |\n")
+            f.write(f"| **{name}** | **{b['catalog_coverage@10']:.4f}** | {b['gini_coefficient@10']:.4f} | {b['novelty_self_information@10']:.4f} | {b['intra_list_diversity@10']:.4f} |\n")
 
         f.write("\n---\n")
         f.write("*Benchmark executed automatically on real MovieLens-100K data without synthetic generation.*\n")

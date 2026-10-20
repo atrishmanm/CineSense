@@ -12,7 +12,6 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

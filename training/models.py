@@ -149,6 +149,172 @@ class HybridRecommender(nn.Module):
         return self.fc(x).squeeze()  # [batch]
 
 
+def _batchnorm_param_keys(model: "HybridRecommender") -> set:
+    """Parameter/buffer names for every BatchNorm in the hybrid ``fc`` stack.
+
+    The legacy checkpoints predate the BatchNorm layers, so these are the
+    only keys legitimately absent from a remapped legacy state dict.
+    """
+    bn_keys = set()
+    for idx, layer in enumerate(model.fc):
+        if isinstance(layer, nn.BatchNorm1d):
+            for suffix in ("weight", "bias", "running_mean", "running_var",
+                           "num_batches_tracked"):
+                bn_keys.add(f"fc.{idx}.{suffix}")
+    return bn_keys
+
+
+def load_hybrid_checkpoint(path, map_location=None):
+    """Load a ``HybridRecommender`` checkpoint, remapping legacy state-dict keys.
+
+    Checkpoints saved by the pre-BatchNorm variant of ``HybridRecommender``
+    (audit F1.1, ``docs/AUDIT-2026-10-19-independent-recheck.md``) use the
+    attribute names ``user_embedding.*`` / ``movie_embedding.*`` and a
+    Sequential whose Linear layers sit at indices 0/3/6/9 under ``fusion.*``,
+    while the current model uses ``user_emb.*`` / ``movie_emb.*`` and Linear
+    layers at indices 0/4/8/12 under ``fc.*`` (BatchNorm/ReLU/Dropout occupy
+    the interleaved slots; ReLU/Dropout are parameterless so they never show
+    up in a state dict). ``load_state_dict`` with the raw legacy keys raises,
+    so every consumer crashed.
+
+    This loader:
+      * loads with ``torch.load(..., weights_only=False)`` and unwraps
+        ``{'state_dict': ...}`` or ``{'model_state_dict': ...}`` payloads,
+        reading ``num_users``/``num_movies`` from the top level when present;
+      * loads directly when the keys already use the current naming;
+      * otherwise remaps by *rank*: the i-th ``fusion`` Linear layer maps to
+        the i-th ``fc`` Linear layer (0→0, 3→4, 6→8, 9→12), and
+        ``user_embedding.*``/``movie_embedding.*`` become
+        ``user_emb.*``/``movie_emb.*``;
+      * instantiates ``HybridRecommender`` using the checkpoint dims, loads
+        with ``strict=False`` and hard-fails unless the only missing keys are
+        BatchNorm parameters (anything else means the remap failed — a silent
+        freshly-initialized model would serve garbage).
+      * logs :banner: ``Initialized hybrid model ... BN params left at
+        defaults`` because the legacy fc had no BatchNorm layers: the running
+        stats stay at init (mean 0 / var 1, gamma 1 / beta 0), so in eval mode
+        BatchNorm degrades to an identity transform plus eps — a close but
+        not exact match to the legacy model. Pending retrain.
+
+    Args:
+        path: path to ``model/hybrid_checkpoint.pt`` / ``hybrid_recommender.pt``.
+        map_location: passed to ``torch.load`` (default: torch's own default).
+
+    Returns:
+        The loaded, eval-ready ``HybridRecommender``.
+
+    Raises:
+        KeyError: if the state dict matches neither key convention.
+        RuntimeError: if remapping leaves non-BatchNorm keys missing or any
+            unexpected keys — the file is not loadable without a retrain.
+    """
+    import logging
+
+    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+
+    if isinstance(ckpt, nn.Module):
+        raise TypeError(
+            f"{path} contains a full pickled nn.Module, expected a state dict "
+            "or a checkpoint dict with 'model_state_dict'."
+        )
+    if not isinstance(ckpt, dict):
+        raise TypeError(f"Unsupported checkpoint payload in {path}: {type(ckpt)!r}")
+
+    sd = ckpt
+    if "model_state_dict" in ckpt and isinstance(ckpt["model_state_dict"], dict):
+        sd = ckpt["model_state_dict"]
+    elif "state_dict" in ckpt and isinstance(ckpt["state_dict"], dict):
+        sd = ckpt["state_dict"]
+
+    model = HybridRecommender(4, 4)  # any dims; fc layout is dim-independent
+
+    if any(k.startswith("user_emb.") for k in sd):
+        # Already matches the current naming — load strictly as-is.
+        num_users = ckpt.get("num_users", sd["user_emb.weight"].shape[0])
+        num_movies = ckpt.get("num_movies", sd["movie_emb.weight"].shape[0])
+        model = HybridRecommender(
+            num_users=num_users, num_movies=num_movies, plot_emb_dim=768
+        )
+        model.load_state_dict(sd)
+        return model
+
+    if "user_embedding.weight" not in sd:
+        raise KeyError(
+            f"{path} matches neither the current ('user_emb.*'/'fc.*') nor the "
+            "legacy ('user_embedding.*'/'fusion.*') HybridRecommender key "
+            "convention."
+        )
+
+    # Rank-based remap: legacy fusion Linear layers (by ascending index) map
+    # onto the current fc Linear layers (0, 4, 8, 12).
+    legacy_linear_idx = sorted(
+        int(k.split(".")[1]) for k in sd if k.startswith("fusion.") and k.endswith("weight")
+    )
+    fc_linear_idx = [
+        i for i, layer in enumerate(model.fc) if isinstance(layer, nn.Linear)
+    ][: len(legacy_linear_idx)]
+    rank_map = {
+        f"fusion.{legacy}.": f"fc.{current}."
+        for legacy, current in zip(legacy_linear_idx, fc_linear_idx)
+    }
+
+    remapped, consumed = {}, set()
+    for k, tensor in sd.items():
+        for legacy_prefix, fc_prefix in rank_map.items():
+            if k.startswith(legacy_prefix):
+                remapped[fc_prefix + k[len(legacy_prefix):]] = tensor
+                consumed.add(k)
+                break
+        else:
+            if k.startswith("user_embedding."):
+                remapped["user_emb." + k[len("user_embedding."):]] = tensor
+                consumed.add(k)
+            elif k.startswith("movie_embedding."):
+                remapped["movie_emb." + k[len("movie_embedding."):]] = tensor
+                consumed.add(k)
+
+    num_users = ckpt.get("num_users", sd["user_embedding.weight"].shape[0])
+    num_movies = ckpt.get("num_movies", sd["movie_embedding.weight"].shape[0])
+    model = HybridRecommender(
+        num_users=num_users, num_movies=num_movies, plot_emb_dim=768
+    )
+
+    # strict=False is intentional: the legacy fc had no BatchNorm layers, so
+    # the BatchNorm params (fc.{1,5,9}.*) are legitimately missing and stay at
+    # their init values. Anything *else* missing or unexpected means the remap
+    # failed and a freshly-initialized Linear layer would serve garbage.
+    result = model.load_state_dict(remapped, strict=False)
+    missing = set(result.missing_keys)
+    expected_keys = {
+        name for name, _ in model.named_parameters()
+    } | {name for name, _ in model.named_buffers()}
+    unexpected = [k for k in remapped if k not in expected_keys]
+
+    real_missing = missing - _batchnorm_param_keys(model)
+    if real_missing:
+        raise RuntimeError(
+            f"Remap of {path} left non-BatchNorm keys missing: "
+            f"{sorted(real_missing)}. The legacy-key mapping failed — refusing "
+            "to return a partially-initialized model (correct the remap or "
+            "retrain; serving fresh default weights would be silent garbage)."
+        )
+    if unexpected:
+        raise RuntimeError(
+            f"Remap of {path} produced keys not present in HybridRecommender: "
+            f"{unexpected}. The legacy-key mapping failed — refusing to "
+            "return a partially-initialized model."
+        )
+
+    if missing:
+        logging.getLogger(__name__).warning(
+            "Initialized hybrid model from %s with remapped legacy keys "
+            "(%s); BN params left at defaults (pending retrain)",
+            path, rank_map,
+        )
+
+    return model
+
+
 def get_model(model_type, num_users, num_movies, plot_emb_dim=768):
     """
     Factory function to get the right model

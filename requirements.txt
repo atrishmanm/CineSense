@@ -29,16 +29,12 @@ Pillow>=10.0.0  # For CLIP image processing
 redis>=5.0.0
 hiredis>=2.2.0  # Faster Redis protocol parsing
 
-# Explainable AI (Optional - for SHAP)
-shap>=0.43.0  # Optional, can be installed separately
+# Explainable AI
+# (moved to the optional section below — imported nowhere)
 
 # Conversational AI & NLP
 tokenizers>=0.15.0  # For transformers
 sentencepiece>=0.1.99  # For some transformers models
-
-# Model Serving
-torchserve>=0.9.0  # Optional for production deployment
-torch-model-archiver>=0.9.0  # For packaging models
 
 # API Integration
 requests==2.31.0
@@ -46,7 +42,6 @@ requests==2.31.0
 # Utilities
 python-dateutil==2.8.2
 schedule==1.2.0
-python-multipart>=0.0.6  # For file uploads
 
 # Production Server
 gunicorn==21.2.0
@@ -55,4 +50,19 @@ gunicorn==21.2.0
 # Development / Testing (not required at runtime)
 # ==========================================
 pytest>=7.4.0
-matplotlib>=3.8.0  # scripts/generate_*_diagram.py
+
+# ==========================================
+# optional: serving/analysis extras — install separately (audit K1.6)
+# Not imported by the app and NOT part of the default install. Install
+# individually only for TorchServe deployment / diagram generation / SHAP:
+#   torchserve + torch-model-archiver pull heavy pinned-torch dependencies.
+# ==========================================
+# torchserve>=0.9.0            # Optional for production deployment
+# torch-model-archiver>=0.9.0  # For packaging models for TorchServe
+# shap>=0.43.0                 # Optional explainability, installed separately
+# python-multipart>=0.0.6      # FastAPI-era dependency, unused by Flask
+# matplotlib>=3.8.0            # scripts/generate_*_diagram.py only
+
+# pyflakes is a dev-only lint gate (CI: .github/workflows/ci.yml installs it)
+# — not listed as a runtime/dev requirement here to keep the default install
+# minimal.

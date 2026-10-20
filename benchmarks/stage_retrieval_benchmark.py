@@ -8,6 +8,21 @@ Evaluates Stage 1 (Candidate Generation) vs Stage 2 (Hybrid Reranking):
 - Measures Final Recall@10 and NDCG@10 after Stage 2 reranking
 - Measures Stage 1 retrieval latency (p50/p95) vs Stage 2 reranking latency (p50/p95)
 - Computes candidate source overlap (Jaccard) between Popularity, Content, and ELO
+
+NOT COMPARABLE TO run_all_benchmarks.py (audit H1.7):
+1. The "ELO" here is a +/-10 per-rating tally (frequentist win/loss count),
+   NOT an ELO rating -- no Bradley-Terry expected-score updates, no
+   provisional-rating adjustment. run_all_benchmarks Part C/Part A uses a
+   real ELO simulation.
+2. The Stage-2 rerank normalization here differs from Part A's hybrid: it
+   clamps cosine into [0,1] via (cos+1)/2 on a binary genre vector and maps
+   raw Elo/counts onto [0,1] ad hoc (:157-160), whereas Part A's hybrid uses
+   min-max normalized Elo and unclamped genre cosine. Different feature
+   scales => different rankings.
+Consequence: `final_ndcg` in this file is NOT comparable to Part A's hybrid
+NDCG; presenting both as "the hybrid" overstates the two-stage system's
+relative quality (audit H1.7). This comment documents the divergence; the
+benchmark itself is intentionally left unchanged.
 """
 
 from __future__ import annotations

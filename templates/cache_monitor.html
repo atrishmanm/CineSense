@@ -147,9 +147,6 @@
     </div>
 </div>
 
-<!-- Cache Monitor Widget Container -->
-<div id="cache-widget-container"></div>
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 <script>
 // Cache Monitoring Dashboard
@@ -290,6 +287,11 @@ const CacheMonitorDashboard = {
             return window.CineSense.API.getCacheStats();
         }
         const response = await fetch('/api/cache/stats');
+        // wave5 fix (J1.13): only parse when the response is OK — an error
+        // body would otherwise flow into transformCacheStats as fake stats.
+        if (!response.ok) {
+            return null;
+        }
         return response.json();
     },
     
@@ -298,19 +300,22 @@ const CacheMonitorDashboard = {
         const cacheManager = response.cache_manager || {};
         const movieCache = cacheManager.movie_cache || { size: 0, max_size: 100, hit_rate: 0 };
         const vectorCache = cacheManager.vector_cache || { size: 0, max_size: 500, hit_rate: 0 };
-        
+
         return {
             movie_cache: {
                 count: movieCache.size || 0,
                 max_size: movieCache.max_size || 100,
                 usage_percent: Math.round((movieCache.size || 0) / (movieCache.max_size || 100) * 100),
-                hit_rate: Math.round((movieCache.hit_rate || 0) * 100)
+                // wave5 fix (J1.18): the API already reports hit_rate as a
+                // 0-100 percent — multiplying again produced "4500%".
+                hit_rate: Math.round(movieCache.hit_rate || 0)
             },
             vector_cache: {
                 count: vectorCache.size || 0,
                 max_size: vectorCache.max_size || 500,
                 usage_percent: Math.round((vectorCache.size || 0) / (vectorCache.max_size || 500) * 100),
-                hit_rate: Math.round((vectorCache.hit_rate || 0) * 100)
+                // wave5 fix (J1.18): values are already percent.
+                hit_rate: Math.round(vectorCache.hit_rate || 0)
             },
             status: {
                 health: this.calculateHealth(movieCache, vectorCache),
@@ -318,11 +323,14 @@ const CacheMonitorDashboard = {
             }
         };
     },
-    
+
     calculateHealth(movieCache, vectorCache) {
+        // wave5 fix (J1.18): hit_rate values here are 0-100 percent, so the
+        // thresholds are scaled to percent (was compared against 0-1
+        // fractions, which always read 'healthy').
         const avgHitRate = ((movieCache.hit_rate || 0) + (vectorCache.hit_rate || 0)) / 2;
-        if (avgHitRate > 0.6) return 'healthy';
-        if (avgHitRate > 0.3) return 'low_hit_rate';
+        if (avgHitRate >= 80) return 'healthy';
+        if (avgHitRate >= 50) return 'low_hit_rate';
         return 'degraded';
     },
     
@@ -418,12 +426,13 @@ const CacheMonitorDashboard = {
         const logContainer = document.getElementById('activity-log');
         
         logContainer.innerHTML = this.activityLog.map(entry => {
-            const color = entry.type === 'error' ? 'text-red-500' : 
+            const color = entry.type === 'error' ? 'text-red-500' :
                          entry.type === 'warning' ? 'text-yellow-500' : 'text-green-500';
-            
+
             return `
                 <div class="${color} mb-1">
-                    [${entry.timestamp}] ${entry.message}
+                    <!-- wave5 fix (J2.x): error text may echo server/api content — escape. -->
+                    [${esc(entry.timestamp)}] ${esc(entry.message)}
                 </div>
             `;
         }).reverse().join('');

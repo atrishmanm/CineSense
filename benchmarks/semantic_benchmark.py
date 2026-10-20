@@ -19,6 +19,17 @@ Metrics:
 - NDCG@10
 - Zero-Result Rate (%)
 - Query Latency: p50 and p95 in milliseconds
+
+GROUND-TRUTH CAVEAT (audit H1.8): relevance is a noisy SUBSTRING match of the
+ground-truth title fragments against catalog titles -- e.g. query "seven"
+(psycho-thriller intent) matches "Seven Years in Tibet" and "psycho" matches
+"American Psycho", inflating the recall denominators ("seven"/"Seven Years in
+Tibet" share the "seven" fragment; "se7en" and "Seven" match different titles).
+Also, queries whose labeled titles match zero catalog entries are DROPPED
+from the quality/latency lists entirely but previously still counted in the
+zero_result_rate / n_queries denominators -- inconsistent bases. Below,
+zero_result_rate and n_queries now rate over the same base as the quality
+metrics: queries actually executed (rel_mids found).
 """
 
 from __future__ import annotations
@@ -91,6 +102,7 @@ def run_semantic_benchmark(movies: Dict[int, Movie], k: int = 10) -> Dict[str, A
     for method in methods:
         recalls, mrrs, ndcgs, latencies = [], [], [], []
         zero_results = 0
+        executed_queries = 0  # queries that found >=1 relevant item in the catalog
 
         for query, intent_genres, ground_truth_titles in LABELED_QUERIES:
             t0 = time.perf_counter()
@@ -115,6 +127,10 @@ def run_semantic_benchmark(movies: Dict[int, Movie], k: int = 10) -> Dict[str, A
 
             if not rel_mids:
                 continue
+            # Audit H1.8: executed_queries (== len(recalls) == len(latencies))
+            # is now the base for every per-method rate, so the zero-result
+            # denominator matches the quality-metric denominators.
+            executed_queries += 1
 
             scores: List[Tuple[int, float]] = []
             for mid, m in movies.items():
@@ -172,14 +188,19 @@ def run_semantic_benchmark(movies: Dict[int, Movie], k: int = 10) -> Dict[str, A
             ndcgs.append(dcg / idcg if idcg > 0 else 0.0)
 
         lat_arr = np.array(latencies)
+        # n_queries / zero_result_rate use `executed_queries` (queries whose
+        # labeled titles actually matched >=1 catalog item). The dropped
+        # (zero-match) queries never entered recalls/mrrs/ndcgs/latencies, so
+        # previously dividing `zero_results` over len(LABELED_QUERIES) mixed
+        # two bases (audit H1.8).
         method_metrics[method] = {
             f"recall@{k}": float(np.mean(recalls)),
             f"mrr@{k}": float(np.mean(mrrs)),
             f"ndcg@{k}": float(np.mean(ndcgs)),
-            "zero_result_rate": float(zero_results / len(LABELED_QUERIES)),
+            "zero_result_rate": float(zero_results / max(executed_queries, 1)),
             "p50_latency_ms": float(np.percentile(lat_arr, 50)),
             "p95_latency_ms": float(np.percentile(lat_arr, 95)),
-            "n_queries": len(LABELED_QUERIES),
+            "n_queries": executed_queries,
         }
 
         print(f"  {method:28s} | Recall@{k}={method_metrics[method][f'recall@{k}']:.4f}  "

@@ -20,7 +20,6 @@ from collections import defaultdict
 
 from config import Config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

@@ -202,6 +202,13 @@ class PreferenceEloRecommender(BaseRecommender):
         return (elo - self._elo_min) / span
 
     def score_item(self, user_id: int, item_id: int) -> float:
+        # Audit H1.2 disclosure: under the benchmark protocol this preference
+        # term is CONSTANT.  ``user_pref`` is populated only from train-rated
+        # items (``fit`` above), and ``BaseRecommender.recommend_all`` removes
+        # exactly those items from the candidate set before scoring, so
+        # ``pref`` is always 0.0 for every scored candidate and the sigmoid
+        # below always returns 0.5.  In this class 0.4 * 0.5 = 0.2 is added to
+        # every candidate alike (a constant offset, harmless for ranking).
         elo = self._norm_elo(self.global_elo.get(item_id, self.initial_elo))
         pref = self.user_pref.get(user_id, {}).get(item_id, 0.0)
         pref_norm = 1.0 / (1.0 + np.exp(-5.0 * pref))  # sigmoid
@@ -238,12 +245,39 @@ class HybridRecommender(BaseRecommender):
         self._content.fit(train_ratings, movies)
         self._pref_elo.fit(train_ratings, movies)
 
+        # Audit H1.2 (STALE-CONST preference term): under the benchmark
+        # protocol the hybrid's "preference" component is PROVABLY CONSTANT.
+        # ``user_pref`` maps each user only to items they rated in train
+        # (PreferenceEloRecommender.fit), and ``recommend_all`` excludes each
+        # user's train-rated items from the candidate set before scoring --
+        # so ``pref_raw`` is 0.0 for every (user, candidate) pair and
+        # sigmoid(-5 * 0) == 0.5 deterministically.  The term contributes a
+        # fixed w_preference * 0.5 to every candidate score, i.e. it does NOT
+        # differentiate candidates.
+        self.preference_active = False
+
+        # Surface the dead term loudly so future reruns cannot quietly compare
+        # ablation rows that differ only in this constant weight (e.g. the
+        # stored "Equal 33/34/33" vs "Pref-heavy 20/60/20" rows are duplicate
+        # configurations).  The weight is KEPT for comparability with already
+        # stored results; changing/removing it requires a flagged benchmark
+        # rerun (see audit H1.2).
+        if self.w_preference != 0.0:
+            print(
+                f"[audit H1.2] WARNING: {self.name}: the preference component "
+                "is constant (0.5) under this protocol -- user_pref items are "
+                "train-rated and excluded from candidates. Rows differing only "
+                "in w_preference are equivalent configurations; "
+                "ablations using it need a rerun to be meaningful."
+            )
+
     def score_item(self, user_id: int, item_id: int) -> float:
         c = self._content.score_item(user_id, item_id)
         elo = self._pref_elo._norm_elo(
             self._pref_elo.global_elo.get(item_id, self._pref_elo.initial_elo)
         )
         pref_raw = self._pref_elo.user_pref.get(user_id, {}).get(item_id, 0.0)
+        # Constant under this protocol: see fit() / audit H1.2 disclosure.
         pref = 1.0 / (1.0 + np.exp(-5.0 * pref_raw))
 
         return self.w_content * c + self.w_preference * pref + self.w_elo * elo

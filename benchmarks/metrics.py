@@ -109,16 +109,22 @@ def intra_list_diversity(
         if len(vecs) < 2:
             continue
         dists: list[float] = []
+        # Symmetric zero-norm handling (audit H1.5): if either vector in a
+        # pair has zero norm, cosine similarity is undefined; we define the
+        # distance to a zero vector as 1.0 (maximally dissimilar) for BOTH
+        # the i-index and the j-index.  The previous code skipped the whole
+        # pair when the i-side norm was zero but appended 1.0 when the
+        # j-side was zero -- asymmetric counting that skewed the mean.
         for i in range(len(vecs)):
             ni = np.linalg.norm(vecs[i])
-            if ni == 0:
-                continue
             for j in range(i + 1, len(vecs)):
                 nj = np.linalg.norm(vecs[j])
-                if nj == 0:
+                if ni == 0 or nj == 0:
                     dists.append(1.0)
                 else:
-                    dists.append(1.0 - float(np.dot(vecs[i], vecs[j]) / (ni * nj)))
+                    sim = float(np.dot(vecs[i], vecs[j]) / (ni * nj))
+                    # clip protects against fp round-off pushing |sim| > 1
+                    dists.append(1.0 - min(1.0, max(-1.0, sim)))
         if dists:
             diversities.append(float(np.mean(dists)))
     return float(np.mean(diversities)) if diversities else 0.0

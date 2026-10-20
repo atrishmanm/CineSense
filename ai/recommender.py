@@ -20,7 +20,6 @@ from config import Config
 import logging
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +37,46 @@ def _normalize_elo(raw_elo):
         return max(0.0, min(1.0, (float(raw_elo) - Config.ELO_BASE) / Config.ELO_BASE))
     except (TypeError, ValueError):
         return 0.5
+
+
+def _to_float(value, default):
+    """None-safe float coercion (wave5 fix C1.7).
+
+    Movie rows come straight out of SQL where a numeric column can be NULL
+    even though the key exists (``movie.get('tmdb_rating', 5.0)`` returns
+    None, not 5.0); float(None) used to kill the whole recommendation call.
+    """
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(value, default):
+    """None-safe int coercion (wave5 fix C1.7); see _to_float."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _movie_key(m):
+    """Stable identity key for de-duplication across DB ('movie_id') and
+    TMDB ('id') payloads (wave5 fix C1.8).
+
+    Entries with neither id fall back to a (tmdb_id, title) tuple so they
+    cannot all collide on the None key; mirrors
+    ai/candidate_generator._movie_key (:25-35).
+    """
+    m = m or {}
+    key = m.get('id') or m.get('movie_id')
+    if key is not None:
+        return key
+    return ('no-id', m.get('tmdb_id'), m.get('title'))
 
 
 class CineSenseRecommender:
@@ -283,16 +322,18 @@ class CineSenseRecommender:
         if movie.get('cast'):
             actors = [a.strip() for a in movie['cast'].split(',')[:10]]
         
-        # Create movie data dictionary (convert Decimal to float)
+        # Create movie data dictionary (convert Decimal to float).
+        # wave5 fix (C1.7): None/bad values fall back to defaults instead of
+        # one SQL-NULL row killing the whole recommendation call.
         movie_data = {
             'genres': genres,
             'directors': directors,
             'actors': actors,
-            'tmdb_rating': float(movie.get('tmdb_rating', 5.0)),
-            'popularity': float(movie.get('popularity', 1.0)),
-            'release_year': int(movie.get('release_year', 2000)),
-            'vote_count': int(movie.get('vote_count', 0)),
-            'runtime': int(movie.get('runtime', 90))
+            'tmdb_rating': _to_float(movie.get('tmdb_rating'), 5.0),
+            'popularity': _to_float(movie.get('popularity'), 1.0),
+            'release_year': _to_int(movie.get('release_year'), 2000),
+            'vote_count': _to_int(movie.get('vote_count'), 0),
+            'runtime': _to_int(movie.get('runtime'), 90)
         }
         
         # Create embedding
@@ -963,13 +1004,12 @@ class CineSenseRecommender:
             movie2 = random.choice(explore_movies)
             
             # Never return the same movie twice (known/explore may overlap).
-            def _key(m):
-                return (m or {}).get('movie_id') or (m or {}).get('tmdb_id') or (m or {}).get('id')
-            
-            if _key(movie1) is not None and _key(movie1) == _key(movie2):
-                alternatives = [m for m in explore_movies if _key(m) != _key(movie1)]
+            # wave5 fix (C1.8): shared _movie_key helper (tuple fallback) so
+            # id-less movies cannot all collapse onto the None key.
+            if _movie_key(movie1) is not None and _movie_key(movie1) == _movie_key(movie2):
+                alternatives = [m for m in explore_movies if _movie_key(m) != _movie_key(movie1)]
                 if not alternatives:
-                    alternatives = [m for m in known_movies if _key(m) != _key(movie1)]
+                    alternatives = [m for m in known_movies if _movie_key(m) != _movie_key(movie1)]
                 if alternatives:
                     movie2 = random.choice(alternatives)
             
@@ -978,8 +1018,8 @@ class CineSenseRecommender:
                 return None, None
             
             # Cache these movies
-            self.cache.put_movie(movie1.get('id') or movie1.get('movie_id'), movie1)
-            self.cache.put_movie(movie2.get('id') or movie2.get('movie_id'), movie2)
+            self.cache.put_movie(_movie_key(movie1), movie1)
+            self.cache.put_movie(_movie_key(movie2), movie2)
             
             return movie1, movie2
             
@@ -1028,8 +1068,9 @@ class CineSenseRecommender:
                 logger.warning("No candidates generated, falling back to cache")
                 candidates = self.cache.movie_cache.get_all_movies()
             
-            # Extract candidate IDs
-            candidate_ids = [m.get('id') or m.get('movie_id') for m in candidates]
+            # Extract candidate IDs (wave5 fix C1.8: _movie_key handles
+            # id-less rows via a tuple fallback instead of all-None keys)
+            candidate_ids = [_movie_key(m) for m in candidates]
             
             # Step 2: Get user embedding (if exists)
             user_model = self._get_user_model(user_id)
@@ -1065,8 +1106,9 @@ class CineSenseRecommender:
                 n=n
             )
             
-            # Convert IDs back to full movie data
-            id_to_movie = {(m.get('id') or m.get('movie_id')): m for m in candidates}
+            # Convert IDs back to full movie data (wave5 fix C1.8: same
+            # _movie_key identity used above when building candidate_ids)
+            id_to_movie = {_movie_key(m): m for m in candidates}
             recommendations = []
             
             for movie_id, score in ranked:
@@ -1146,6 +1188,11 @@ class CineSenseRecommender:
             
             for movie in candidates:
                 raw_genres = movie.get('genre_ids', []) or movie.get('genres', [])
+                # wave5 fix (C1.2): DB rows carry 'Action,Drama' as a string;
+                # without splitting, the loop below iterated the string per
+                # character and contaminated the encoder vocabulary.
+                if isinstance(raw_genres, str):
+                    raw_genres = [p.strip() for p in raw_genres.split(',') if p.strip()]
                 names = []
                 for g in raw_genres:
                     if isinstance(g, dict):
@@ -1262,14 +1309,22 @@ class CineSenseRecommender:
                     if len(word) > 2:
                         if word in overview:
                             score += 8.0
-                        # Partial word matches
-                        if any(word in w for w in overview.split()):
+                        elif any(word in w for w in overview.split()):
+                            # wave5 fix (C1.4): the substring hit above already
+                            # scored +8; making this branch elif stops every
+                            # hit contributing a double-counted 11.
                             score += 3.0
                 
                 # 5. Genre matching
                 for genre, keywords in genre_keywords.items():
                     if any(kw in query_lower for kw in keywords):
-                        if genre in content_genres:
+                        # wave5 fix (C1.5): DB genre strings use the canonical
+                        # 'Science Fiction', so the literal 'sci-fi' key must
+                        # also match that alias or the boost never fires.
+                        if genre == 'sci-fi':
+                            if 'sci-fi' in content_genres or 'science fiction' in content_genres:
+                                score += 10.0
+                        elif genre in content_genres:
                             score += 10.0
                 
                 # 6. Mood/theme matching

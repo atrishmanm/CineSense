@@ -35,7 +35,8 @@ data/ (MovieLens-32M + TMDB raw csv, see CINESENSE_DATA_DIR in preprocessing)
 
 | Artifact | Produced by | Consumed by |
 | --- | --- | --- |
-| `models/kaggle_t4x2_full32m/cinesense_deep_v3_full32m_best.pt` (+ `cinesense_deep_v2_best.pt`, `metrics.json`) | `kaggle_runner/train_kaggle_t4x2.py` on Kaggle dual T4x2, full 32M | `serving/model_handler.py` (default candidate), `training/deep_v3.load_v3_checkpoint` |
+| `models/kaggle_t4x2_full32m/cinesense_deep_v3_full32m_best.pt` (+ `metrics.json`) | `kaggle_runner/train_kaggle_t4x2.py` on Kaggle dual T4x2, full 32M | `serving/model_handler.py` (default candidate), `training/deep_v3.load_v3_checkpoint` |
+| `models/kaggle_t4x2_full32m/cinesense_deep_v2_best.pt` | **NOT a V2 model.** The Kaggle script saves the *same V3 state dict* under both names on the same epoch (audit G1.7: `kaggle_runner/train_kaggle_t4x2.py:540-541`, see `docs/AUDIT-2026-10-19-independent-recheck.md`); the 'v2' name is a mislabel. Loading this file with a V2/advanced_models_v2 class is wrong — treat it as a V3 duplicate. | none (canonically served via the `..._v3_full32m_best.pt` twin) |
 | `models/kaggle_t4x2_3m_subset/cinesense_deep_v3_3m_subset_best.pt` | same script on the 3M-subset Kaggle run | same as above |
 | `models/kaggle_t4x2/cinesense_t4x2_best.pt` | earlier T4x2 run | archive / metrics.json only |
 

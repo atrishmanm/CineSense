@@ -22,7 +22,6 @@ import logging
 from pathlib import Path
 import pickle
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

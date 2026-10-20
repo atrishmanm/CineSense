@@ -267,22 +267,23 @@
         const genresContainer = document.getElementById(`movie-${num}-genres`);
         if (movie.genres) {
             const genres = movie.genres.split(',').map(g => g.trim());
-            genresContainer.innerHTML = genres.map(genre => 
-                `<span class="px-3 py-1 bg-gray-800 rounded-full text-sm">${genre}</span>`
+            // wave5 fix (J2.4): cast/director/genre strings are DB text — escape.
+            genresContainer.innerHTML = genres.map(genre =>
+                `<span class="px-3 py-1 bg-gray-800 rounded-full text-sm">${esc(genre)}</span>`
             ).join('');
         }
-        
+
         // Cast
         const castContainer = document.getElementById(`movie-${num}-cast`);
         if (movie.cast) {
             const cast = movie.cast.split(',').slice(0, 3).join(', ');
-            castContainer.innerHTML = `<strong>Cast:</strong> ${cast}`;
+            castContainer.innerHTML = `<strong>Cast:</strong> ${esc(cast)}`;
         }
-        
+
         // Director
         const directorContainer = document.getElementById(`movie-${num}-director`);
         if (movie.directors) {
-            directorContainer.innerHTML = `<strong>Director:</strong> ${movie.directors}`;
+            directorContainer.innerHTML = `<strong>Director:</strong> ${esc(movie.directors)}`;
         }
     }
     

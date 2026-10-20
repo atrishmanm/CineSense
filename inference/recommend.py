@@ -85,13 +85,25 @@ class ProductionRecommender:
             logger.info(f"Loaded plot embeddings: {self.plot_embeddings.shape}")
         
         # Load model
-        self.model = get_model(model_type, self.num_users, self.num_movies, plot_emb_dim=768)
-        
         checkpoint_path = _require_file(
             MODEL_DIR / f"{model_type}_recommender.pt", f"{model_type.title()} checkpoint"
         )
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
+        if model_type == 'hybrid':
+            # Route through the checkpoint-compatibility loader (audit F1.1):
+            # legacy checkpoints use the pre-BatchNorm key convention
+            # (user_embedding.* / movie_embedding.* / fusion.*), which
+            # load_state_dict with raw keys cannot consume.
+            from training.models import load_hybrid_checkpoint
+            # load_hybrid_checkpoint remaps legacy keys, validates that only
+            # BatchNorm params are missing and logs any defaults itself
+            # (audit F1.1).
+            self.model = load_hybrid_checkpoint(
+                checkpoint_path, map_location=self.device
+            )
+        else:
+            self.model = get_model(model_type, self.num_users, self.num_movies)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model = self.model.to(self.device)
         self.model.eval()
         

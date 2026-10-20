@@ -12,7 +12,14 @@ class Config:
     # this fallback is used.  In production always set SECRET_KEY.
     SECRET_KEY = os.getenv('SECRET_KEY') or secrets.token_hex(32)
     PORT = int(os.getenv('PORT', 5000))
-    DEBUG = os.getenv('FLASK_ENV') == 'development'
+    # wave5 fix (A2.5b): FLASK_ENV is deprecated in Flask 3; FLASK_DEBUG='1' is
+    # the supported toggle while the development check keeps legacy .env files
+    # working.
+    DEBUG = os.getenv('FLASK_DEBUG') == '1' or os.getenv('FLASK_ENV') == 'development'
+    # Host/CORS passthroughs (read at their use sites in app_integrated.py,
+    # which also applies the same defaults).
+    HOST = os.getenv('HOST', '0.0.0.0')
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*')
 
     # Request/upload size limit. The app itself enforces this in
     # app_integrated.py via app.config['MAX_CONTENT_LENGTH'] = 16 MB.

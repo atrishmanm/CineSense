@@ -9,12 +9,12 @@ Discard old unused ones (LRU eviction)
 
 from collections import OrderedDict
 from datetime import datetime
+import threading
 import time
 import logging
 
 from config import Config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -23,6 +23,10 @@ class SlidingWindowCache:
     LRU Cache for movies with automatic eviction
     
     This is the "conveyor belt" - movies slide through memory
+
+    All public methods are guarded by an RLock: Flask runs threaded and the
+    concurrent move_to_end/popitem/counter-inscrement sequences are not
+    otherwise safe (wave5 fix C1.28).
     """
     
     def __init__(self, max_size=Config.MOVIE_CACHE_SIZE):
@@ -37,6 +41,14 @@ class SlidingWindowCache:
         # Hit/miss counters (cumulative, consumed by the cache monitor endpoint)
         self.hits = 0
         self.misses = 0
+        # wave5 fix (C1.30): honest access counter -- previously
+        # total_access_count summed access_count, which includes the +1
+        # seed put() records for every insertion (accesses + insertions
+        # mixed). This counter is only touched by real accesses/overwrites.
+        self.access_total = 0
+        # wave5 fix (C1.28): RLock so re-entrant internal calls (_evict_lru
+        # from put, put from bulk_put) do not deadlock.
+        self._lock = threading.RLock()
         
     def get(self, movie_id):
         """
@@ -45,40 +57,52 @@ class SlidingWindowCache:
         Updates access time (moves to end of OrderedDict)
         This implements LRU behavior
         """
-        if movie_id in self.cache:
-            # Move to end (most recently used)
-            self.cache.move_to_end(movie_id)
-            self.access_count[movie_id] = self.access_count.get(movie_id, 0) + 1
-            self.last_access[movie_id] = time.time()
-            self.hits += 1
-            return self.cache[movie_id]
-        self.misses += 1
-        return None
+        with self._lock:
+            if movie_id in self.cache:
+                # Move to end (most recently used)
+                self.cache.move_to_end(movie_id)
+                self.access_count[movie_id] = self.access_count.get(movie_id, 0) + 1
+                self.last_access[movie_id] = time.time()
+                self.hits += 1
+                self.access_total += 1  # wave5 fix (C1.30)
+                return self.cache[movie_id]
+            self.misses += 1
+            return None
     
     def put(self, movie_id, movie_data):
         """
         Add movie to cache
         
         If cache is full, evict least recently used movie
+
+        wave5 fix (C1.29): overwriting an existing key now refreshes
+        last_access and counts as an access (access_count bump), matching
+        get() semantics; the stats no longer go stale for overwritten
+        entries. The insertion seed of 1 is preserved for new keys (see the
+        total_access_count note in CacheManager.get_stats).
         """
-        if movie_id in self.cache:
-            # Update existing entry
-            self.cache.move_to_end(movie_id)
-            self.cache[movie_id] = movie_data
-        else:
-            # Add new entry
-            self.cache[movie_id] = movie_data
-            self.access_count[movie_id] = 1
-            self.last_access[movie_id] = time.time()
-            
-            # Evict if necessary
-            if len(self.cache) > self.max_size:
-                self._evict_lru()
+        with self._lock:
+            if movie_id in self.cache:
+                # Update existing entry
+                self.cache.move_to_end(movie_id)
+                self.cache[movie_id] = movie_data
+                self.access_count[movie_id] = self.access_count.get(movie_id, 0) + 1
+                self.last_access[movie_id] = time.time()
+                self.access_total += 1  # wave5 fix (C1.30)
+            else:
+                # Add new entry
+                self.cache[movie_id] = movie_data
+                self.access_count[movie_id] = 1
+                self.last_access[movie_id] = time.time()
+                
+                # Evict if necessary
+                if len(self.cache) > self.max_size:
+                    self._evict_lru()
     
     def _evict_lru(self):
         """Evict least recently used movie"""
         # Remove first item (least recently used)
-        evicted_id, evicted_data = self.cache.popitem(last=False)
+        evicted_id, _evicted_data = self.cache.popitem(last=False)  # wave5 fix (C1.29): drop unused unpack name
         
         # Clean up tracking data
         if evicted_id in self.access_count:
@@ -95,18 +119,21 @@ class SlidingWindowCache:
         Args:
             movies: List of dicts with 'id' or 'movie_id' key
         """
-        for movie in movies:
-            movie_id = movie.get('id') or movie.get('movie_id')
-            if movie_id:
-                self.put(movie_id, movie)
+        with self._lock:
+            for movie in movies:
+                movie_id = movie.get('id') or movie.get('movie_id')
+                if movie_id:
+                    self.put(movie_id, movie)
     
     def contains(self, movie_id):
         """Check if movie is in cache"""
-        return movie_id in self.cache
+        with self._lock:
+            return movie_id in self.cache
     
     def size(self):
         """Get current cache size"""
-        return len(self.cache)
+        with self._lock:
+            return len(self.cache)
     
     def is_low(self, threshold=Config.CACHE_REFILL_THRESHOLD):
         """
@@ -118,35 +145,45 @@ class SlidingWindowCache:
         Returns:
             bool: True if cache should be refilled
         """
-        return len(self.cache) < (self.max_size * threshold)
+        with self._lock:
+            return len(self.cache) < (self.max_size * threshold)
     
     def get_all_ids(self):
         """Get all movie IDs currently in cache"""
-        return list(self.cache.keys())
+        with self._lock:
+            return list(self.cache.keys())
     
     def get_all_movies(self):
         """Get all movies currently in cache"""
-        return list(self.cache.values())
+        with self._lock:
+            return list(self.cache.values())
     
     def clear(self):
-        """Clear entire cache"""
-        self.cache.clear()
-        self.access_count.clear()
-        self.last_access.clear()
+        """Clear entire cache
+
+        Note (C1.30 context): this does NOT reset the cumulative hits/misses
+        counters -- consumers of the cache monitor expect lifetime counters
+        to survive a data-only clear.
+        """
+        with self._lock:
+            self.cache.clear()
+            self.access_count.clear()
+            self.last_access.clear()
     
     def stats(self):
         """Get cache statistics"""
-        total = self.hits + self.misses
-        return {
-            'size': len(self.cache),
-            'max_size': self.max_size,
-            'utilization': len(self.cache) / self.max_size if self.max_size > 0 else 0,
-            'total_access_count': sum(self.access_count.values()),
-            'avg_access_per_movie': sum(self.access_count.values()) / len(self.cache) if self.cache else 0,
-            'hits': self.hits,
-            'misses': self.misses,
-            'hit_rate': (self.hits / total * Config.PERCENT_SCALE) if total > 0 else 0.0,
-        }
+        with self._lock:
+            total = self.hits + self.misses
+            return {
+                'size': len(self.cache),
+                'max_size': self.max_size,
+                'utilization': len(self.cache) / self.max_size if self.max_size > 0 else 0,
+                'total_access_count': self.access_total,
+                'avg_access_per_movie': self.access_total / len(self.cache) if self.cache else 0,
+                'hits': self.hits,
+                'misses': self.misses,
+                'hit_rate': (self.hits / total * Config.PERCENT_SCALE) if total > 0 else 0.0,
+            }
 
 
 class VectorCache:
@@ -170,28 +207,32 @@ class VectorCache:
         # Hit/miss counters (cumulative, consumed by the cache monitor endpoint)
         self.hits = 0
         self.misses = 0
+        # wave5 fix (C1.28): same thread-safety guard as SlidingWindowCache.
+        self._lock = threading.RLock()
     
     def get(self, movie_id):
         """Get vector for movie"""
-        if movie_id in self.vectors:
-            self.vectors.move_to_end(movie_id)
-            self.hits += 1
-            return self.vectors[movie_id]
-        self.misses += 1
-        return None
+        with self._lock:
+            if movie_id in self.vectors:
+                self.vectors.move_to_end(movie_id)
+                self.hits += 1
+                return self.vectors[movie_id]
+            self.misses += 1
+            return None
     
     def put(self, movie_id, vector):
         """Store (or overwrite) vector for movie"""
-        if movie_id in self.vectors:
-            # Overwrite the stale embedding and refresh LRU position
-            self.vectors[movie_id] = vector
-            self.vectors.move_to_end(movie_id)
-        else:
-            self.vectors[movie_id] = vector
-            
-            # Evict if necessary
-            if len(self.vectors) > self.max_size:
-                self.vectors.popitem(last=False)
+        with self._lock:
+            if movie_id in self.vectors:
+                # Overwrite the stale embedding and refresh LRU position
+                self.vectors[movie_id] = vector
+                self.vectors.move_to_end(movie_id)
+            else:
+                self.vectors[movie_id] = vector
+                
+                # Evict if necessary
+                if len(self.vectors) > self.max_size:
+                    self.vectors.popitem(last=False)
     
     def bulk_put(self, vectors_dict):
         """
@@ -200,32 +241,39 @@ class VectorCache:
         Args:
             vectors_dict: {movie_id: vector, ...}
         """
-        for movie_id, vector in vectors_dict.items():
-            self.put(movie_id, vector)
+        with self._lock:
+            for movie_id, vector in vectors_dict.items():
+                self.put(movie_id, vector)
     
     def contains(self, movie_id):
         """Check if vector exists"""
-        return movie_id in self.vectors
+        with self._lock:
+            return movie_id in self.vectors
     
     def size(self):
         """Get cache size"""
-        return len(self.vectors)
+        with self._lock:
+            return len(self.vectors)
     
     def stats(self):
         """Get vector cache statistics"""
-        total = self.hits + self.misses
-        return {
-            'size': len(self.vectors),
-            'max_size': self.max_size,
-            'utilization': len(self.vectors) / self.max_size if self.max_size > 0 else 0,
-            'hits': self.hits,
-            'misses': self.misses,
-            'hit_rate': (self.hits / total * Config.PERCENT_SCALE) if total > 0 else 0.0,
-        }
+        with self._lock:
+            total = self.hits + self.misses
+            return {
+                'size': len(self.vectors),
+                'max_size': self.max_size,
+                'utilization': len(self.vectors) / self.max_size if self.max_size > 0 else 0,
+                'hits': self.hits,
+                'misses': self.misses,
+                'hit_rate': (self.hits / total * Config.PERCENT_SCALE) if total > 0 else 0.0,
+            }
     
     def clear(self):
         """Clear all vectors"""
-        self.vectors.clear()
+        # wave5 fix (C1.28): cumulative hits/misses intentionally NOT reset
+        # (see SlidingWindowCache.clear note).
+        with self._lock:
+            self.vectors.clear()
 
 
 class CacheManager:
@@ -278,20 +326,29 @@ class CacheManager:
         Returns the nested ``movie_cache``/``vector_cache`` blocks for internal
         callers *and* flat top-level counters (``movie_count``, ``movie_hits``,
         ``movie_misses``, ``vector_count``, ``vector_hits``, ``vector_misses``,
-        ``timestamp``) that the API cache-monitor endpoint expects.
+        ``movie_max_size``, ``vector_max_size``, ``timestamp``) that the API
+        cache-monitor endpoint expects.
+
+        Note (C1.30): fixed -- ``total_access_count`` is now a real access
+        counter (get hits + put overwrites), excluding put()'s insertion
+        seed; see SlidingWindowCache.access_total.
         """
         movie_stats = self.movie_cache.stats()
         vector_stats = self.vector_cache.stats()
         return {
             'movie_cache': movie_stats,
             'vector_cache': vector_stats,
-            # Flat aliases consumed by /api/cache/monitor and the JS widget
+            # Flat aliases consumed by /api/cache/monitor and the JS widget.
+            # wave5 fix (C1.31): the *_max_size flat keys are produced here so
+            # routes.py:1579 no longer has to duplicate the 100/500 defaults.
             'movie_count': movie_stats['size'],
             'movie_hits': movie_stats.get('hits', 0),
             'movie_misses': movie_stats.get('misses', 0),
+            'movie_max_size': movie_stats.get('max_size'),
             'vector_count': vector_stats['size'],
             'vector_hits': vector_stats.get('hits', 0),
             'vector_misses': vector_stats.get('misses', 0),
+            'vector_max_size': vector_stats.get('max_size'),
             'timestamp': datetime.now().isoformat(),
         }
     

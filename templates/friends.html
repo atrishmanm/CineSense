@@ -127,7 +127,8 @@
             
             const container = document.getElementById('friends-list');
             if (data.error) {
-                container.innerHTML = `<div class="text-yellow-400 text-center py-4">${data.error}</div>`;
+                // wave5 fix (J2.3): API errors echo user-supplied input — escape.
+                container.innerHTML = `<div class="text-yellow-400 text-center py-4">${esc(data.error)}</div>`;
                 return;
             }
             
@@ -141,10 +142,11 @@
                 <div class="flex items-center justify-between bg-gray-800 rounded-lg p-4">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center font-bold text-lg">
-                            ${(f.username || '?')[0].toUpperCase()}
+                            ${esc((f.username || '?')[0].toUpperCase())}
                         </div>
                         <div>
-                            <div class="font-semibold">${f.username}</div>
+                            <!-- wave5 fix (J2.2): escape user-supplied username. -->
+                            <div class="font-semibold">${esc(f.username)}</div>
                             <div class="text-sm text-gray-400">Friends since ${new Date(f.created_at).toLocaleDateString()}</div>
                         </div>
                     </div>
@@ -168,7 +170,8 @@
             
             const container = document.getElementById('requests-list');
             if (data.error) {
-                container.innerHTML = `<div class="text-yellow-400 text-center py-4">${data.error}</div>`;
+                // wave5 fix (J2.3): API errors echo user-supplied input — escape.
+                container.innerHTML = `<div class="text-yellow-400 text-center py-4">${esc(data.error)}</div>`;
                 return;
             }
             
@@ -190,10 +193,11 @@
                 <div class="flex items-center justify-between bg-gray-800 rounded-lg p-4">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center font-bold text-lg">
-                            ${(r.username || '?')[0].toUpperCase()}
+                            ${esc((r.username || '?')[0].toUpperCase())}
                         </div>
                         <div>
-                            <div class="font-semibold">${r.username}</div>
+                            <!-- wave5 fix (J2.2): escape user-supplied username. -->
+                            <div class="font-semibold">${esc(r.username)}</div>
                             <div class="text-sm text-gray-400">Sent ${new Date(r.created_at).toLocaleDateString()}</div>
                         </div>
                     </div>
@@ -305,11 +309,12 @@
                 return `
                     <div class="cursor-pointer group" onclick="window.location.href='/movie/${movie.movie_id}'">
                         <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition group-hover:scale-105">
-                            <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy">
+                            <img src="${posterUrl}" alt="${esc(movie.title)}" class="w-full h-full object-cover" loading="lazy">
                             <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition">
                                 <div class="absolute bottom-0 left-0 right-0 p-3">
-                                    <h3 class="font-bold text-sm">${movie.title}</h3>
-                                    ${movie.recommended_by ? `<p class="text-xs text-indigo-400">Liked by ${movie.recommended_by}</p>` : ''}
+                                    <!-- wave5 fix (J2.4): title / recommended_by are DB text — escape. -->
+                                    <h3 class="font-bold text-sm">${esc(movie.title)}</h3>
+                                    ${movie.recommended_by ? `<p class="text-xs text-indigo-400">Liked by ${esc(movie.recommended_by)}</p>` : ''}
                                 </div>
                             </div>
                         </div>
@@ -379,10 +384,11 @@
                     : 'https://via.placeholder.com/200x300/1a1a1a/666666?text=Movie';
                 return `
                     <div class="flex items-center gap-4 bg-gray-800 rounded-lg p-4">
-                        <img src="${posterUrl}" alt="${p.movie_title}" class="w-16 h-24 object-cover rounded">
+                        <img src="${posterUrl}" alt="${esc(p.movie_title)}" class="w-16 h-24 object-cover rounded">
                         <div class="flex-1">
-                            <h4 class="font-semibold">${p.movie_title}</h4>
-                            <p class="text-sm text-gray-400">Hosted by ${p.host_name}</p>
+                            <!-- wave5 fix (J2.2): movie title / host name are DB text — escape. -->
+                            <h4 class="font-semibold">${esc(p.movie_title)}</h4>
+                            <p class="text-sm text-gray-400">Hosted by ${esc(p.host_name)}</p>
                             <p class="text-sm text-indigo-400">${new Date(p.scheduled_time).toLocaleString()}</p>
                         </div>
                         <span class="px-3 py-1 bg-purple-600/30 text-purple-300 rounded-full text-sm">${p.status}</span>

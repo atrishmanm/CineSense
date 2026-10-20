@@ -244,12 +244,17 @@
     };
     
     // Horizontal scroll state - using different offsets and orders
+    // wave5 fix (J1.6): 'action'/'thriller' previously hit /api/movie/top-rated
+    // (no genre filter → generic popular rows). by-genre supports offset
+    // pagination, so the sections now carry a real genre. Their old 30/60
+    // offsets existed only to de-duplicate the shared popularity stream.
+    // wave5 fix (J1.9): each section gains a loading/exhausted guard.
     const scrollSections = {
-        'top-picks': { offset: 0, limit: 30, loaded: 0, order: 'elo_score' },
-        'action': { offset: 30, limit: 30, loaded: 0, order: 'popularity' },
-        'thriller': { offset: 60, limit: 30, loaded: 0, order: 'popularity' },
-        'top-rated': { offset: 0, limit: 30, loaded: 0, order: 'tmdb_rating' },
-        'trending': { offset: 15, limit: 30, loaded: 0, order: 'elo_score' }
+        'top-picks': { offset: 0, initialOffset: 0, limit: 30, loaded: 0, order: 'elo_score' },
+        'action': { offset: 0, initialOffset: 0, limit: 30, loaded: 0, genre: 'Action' },
+        'thriller': { offset: 0, initialOffset: 0, limit: 30, loaded: 0, genre: 'Thriller' },
+        'top-rated': { offset: 0, initialOffset: 0, limit: 30, loaded: 0, order: 'tmdb_rating' },
+        'trending': { offset: 15, initialOffset: 15, limit: 30, loaded: 0, order: 'elo_score' }
     };
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -259,7 +264,7 @@
             await loadAllSections();
             initializeHorizontalScroll();
             initializeFilters();
-            initializeAISearch();
+            // wave5 fix (J1.16): removed dead initializeAISearch() call.
             startCarousel();
         } catch (err) {
             console.error('Page init error:', err);
@@ -282,7 +287,9 @@
     // Load compared movies for filtering
     async function loadComparedMovies() {
         try {
-            const response = await fetchWithTimeout('/api/user/compared-movies');
+            // wave5 fix (J1.11): 1500 ms routinely timed out this endpoint and
+            // left comparedMovieIds empty → give it 8 s.
+            const response = await fetchWithTimeout('/api/user/compared-movies', {}, 8000);
             if (response.ok) {
                 const data = await response.json();
                 if (data && Array.isArray(data.movies)) {
@@ -315,76 +322,22 @@
         }
     }
     
-    // Initialize AI-powered search
-    function initializeAISearch() {
-        const searchInput = document.getElementById('ai-search');
-        const searchIndicator = document.getElementById('ai-search-indicator');
-        
-        // Exit early if elements don't exist
-        if (!searchInput || !searchIndicator) {
-            return;
-        }
-        
-        let searchTimeout;
-        searchInput.addEventListener('input', (e) => {
-            clearTimeout(searchTimeout);
-            const query = e.target.value.trim();
-            
-            if (query.length < 3) return;
-            
-            searchIndicator.classList.remove('hidden');
-            
-            searchTimeout = setTimeout(async () => {
-                try {
-                    const response = await fetch('/api/search/ai', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query })
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        displaySearchResults(data.results);
-                    }
-                } catch (error) {
-                    console.error('AI search error:', error);
-                } finally {
-                    searchIndicator.classList.add('hidden');
-                }
-            }, 500);
-        });
-    }
-    
-    // Display AI search results
-    function displaySearchResults(results) {
-        // Clear all sections and display search results
-        Object.keys(scrollSections).forEach(section => {
-            const container = document.getElementById(`${section}-scroll`);
-            if (container) container.innerHTML = '';
-        });
-        
-        if (results && results.length > 0) {
-            const topPicksContainer = document.getElementById('top-picks-scroll');
-            results.forEach(movie => {
-                if (!shouldFilterMovie(movie)) {
-                    topPicksContainer.innerHTML += createHorizontalCard(movie);
-                }
-            });
-            document.getElementById('top-picks-section').classList.remove('hidden');
-        }
-    }
-    
+    // wave5 fix (J1.16): removed the dead initializeAISearch/displaySearchResults
+    // block — it bound to #ai-search/#ai-search-indicator ids that no longer
+    // exist in any markup (left from a replaced design).
+
     // Reload all sections with current filters
     async function reloadAllSections() {
         // Clear all sections
         Object.keys(scrollSections).forEach(section => {
             const container = document.getElementById(`${section}-scroll`);
             if (container) container.innerHTML = '';
-            scrollSections[section].offset = section === 'top-picks' ? 0 : 
-                                            section === 'action' ? 30 : 
-                                            section === 'thriller' ? 60 : 
-                                            section === 'trending' ? 15 : 0;
+            // wave5 fix (J1.9): also reset the per-section in-flight/exhausted
+            // guards; wave5 fix (J1.6): use the declared initialOffset.
+            scrollSections[section].offset = scrollSections[section].initialOffset;
             scrollSections[section].loaded = 0;
+            scrollSections[section].loading = false;
+            delete scrollSections[section].exhausted;
         });
         
         // Clear loaded movie IDs
@@ -462,7 +415,9 @@
                     <div class="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-transparent"></div>
                     <div class="relative h-full flex items-center">
                         <div class="container mx-auto px-8 md:px-12 max-w-2xl">
-                            <h1 class="text-5xl md:text-7xl font-black mb-4 drop-shadow-lg">${title}</h1>
+                            <!-- wave5 fix (J2.4): titles/overview are DB-ingested
+                             text — escape before interpolation. -->
+                            <h1 class="text-5xl md:text-7xl font-black mb-4 drop-shadow-lg">${esc(title)}</h1>
                             <div class="flex items-center gap-4 mb-6">
                                 <span class="flex items-center text-yellow-400 font-bold text-lg">
                                     <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -472,7 +427,7 @@
                                 </span>
                                 <span class="text-gray-300">${movie.release_year || ''}</span>
                             </div>
-                            <p class="text-lg text-gray-300 mb-8 line-clamp-3">${movie.overview || ''}</p>
+                            <p class="text-lg text-gray-300 mb-8 line-clamp-3">${esc(movie.overview || '')}</p>
                             <div class="flex gap-4">
                                 <button onclick="window.location.href='/movie/${movie.movie_id}'" class="px-8 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-bold text-lg transition">
                                     More Info
@@ -535,25 +490,31 @@
         const params = new URLSearchParams();
         params.append('limit', limit.toString());
         params.append('offset', scrollSections[sectionName].offset.toString());
-        
+
         // Add media type filter
         if (currentFilters.mediaType !== 'all') {
             params.append('media_type', currentFilters.mediaType);
         }
-        
+
+        // wave5 fix (J1.6): genre sections now use the genre-filtered
+        // endpoint (which supports limit/offset) instead of an unfiltered
+        // top-rated call whose rows only "looked" Action/Thriller.
+        const section = scrollSections[sectionName];
+        if (section.genre) {
+            params.append('genre', section.genre);
+            params.append('sort_by', 'popularity');
+            return `/api/movie/by-genre?${params.toString()}`;
+        }
+
         // Determine base URL and parameters
         if (sectionName === 'top-picks') {
             return `/api/movie/top-rated?order_by=elo_score&${params.toString()}`;
-        } else if (sectionName === 'action') {
-            return `/api/movie/top-rated?order_by=popularity&${params.toString()}`;
-        } else if (sectionName === 'thriller') {
-            return `/api/movie/top-rated?order_by=popularity&${params.toString()}`;
         } else if (sectionName === 'top-rated') {
             return `/api/movie/top-rated?order_by=tmdb_rating&${params.toString()}`;
         } else if (sectionName === 'trending') {
             return `/api/movie/top-rated?order_by=elo_score&${params.toString()}`;
         }
-        
+
         return `/api/movie/top-rated?${params.toString()}`;
     }
     
@@ -622,7 +583,8 @@
         return `
             <div class="flex-shrink-0 w-48 group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
                 <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl">
-                    <img src="${posterUrl}" alt="${title}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(title)}';" />
+                    <!-- wave5 fix (J2.4): title comes straight from TMDB/DB ingest. -->
+                    <img src="${posterUrl}" alt="${esc(title)}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(title)}';" />
                     <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                         <div class="absolute bottom-0 left-0 right-0 p-3">
                             <div class="flex items-center justify-between mb-1">
@@ -634,7 +596,7 @@
                                 </span>
                                 <span class="text-xs text-gray-300">${movie.release_year || ''}</span>
                             </div>
-                            <h3 class="font-bold text-xs line-clamp-2">${title}</h3>
+                            <h3 class="font-bold text-xs line-clamp-2">${esc(title)}</h3>
                         </div>
                     </div>
                 </div>
@@ -662,16 +624,37 @@
     
     async function loadMoreInSection(sectionName) {
         const section = scrollSections[sectionName];
-        
+
+        // wave5 fix (J1.9): per-section in-flight + exhausted guards stop the
+        // debounced 200ms scroll handler from firing overlapping fetches and
+        // refetching an empty stream forever.
+        if (section.loading || section.exhausted) return;
+
         // Check if limit reached
         if (section.loaded >= section.limit) {
-            document.getElementById(`${sectionName}-view-all`).classList.remove('hidden');
+            // wave5 fix (J1.5): no `${sectionName}-view-all` element exists in
+            // the markup — guard the null lookup instead of throwing a
+            // TypeError that aborted further section loading.
+            const viewAll = document.getElementById(`${sectionName}-view-all`);
+            if (viewAll) viewAll.classList.remove('hidden');
             return;
         }
-        
+
         let url;
         if (sectionName === 'top-picks') {
             url = `/api/recommendations?limit=10&offset=${section.offset}`;
+        } else if (section.genre) {
+            // wave5 fix (J1.6): keep scroll-loads genre-filtered too, or the
+            // matched rows would silently change after a manual scroll.
+            const params = new URLSearchParams();
+            params.append('genre', section.genre);
+            params.append('sort_by', 'popularity');
+            params.append('limit', '10');
+            params.append('offset', section.offset.toString());
+            if (currentFilters.mediaType !== 'all') {
+                params.append('media_type', currentFilters.mediaType);
+            }
+            url = `/api/movie/by-genre?${params.toString()}`;
         } else {
             // All other sections use top-rated endpoint with different orderings
             url = `/api/movie/top-rated?order_by=${section.order}&limit=10&offset=${section.offset}`;
@@ -681,42 +664,52 @@
                 url += `&media_type=${encodeURIComponent(currentFilters.mediaType)}`;
             }
         }
-        
+
+        section.loading = true;
         try {
             const response = await fetch(url);
             const data = await response.json();
             let movies = data.movies || [];
 
-            // Advance the offset by the RAW page size: the dedupe filter below
-            // can remove all rows on an all-duplicate page, and advancing by
-            // the deduped count would refetch the same window forever.
             const rawCount = movies.length;
 
-            // Filter out duplicates
+            // wave5 fix (J1.10): apply the same media-type / hide-compared
+            // filters here as the first-paint path (they were bypassed by the
+            // scroll-load path).
             movies = movies.filter(movie => {
                 if (loadedMovieIds.has(movie.movie_id)) {
+                    return false;
+                }
+                if (shouldFilterMovie(movie)) {
                     return false;
                 }
                 loadedMovieIds.add(movie.movie_id);
                 return true;
             });
 
-            if (rawCount > 0) {
-                section.offset += rawCount;
-                section.loaded += movies.length;
-            }
+            // Advance the offset by the RAW page size: the dedupe filter above
+            // can remove all rows on an all-duplicate page, and advancing by
+            // the deduped count would refetch the same window forever.
+            section.offset += rawCount;
+            section.loaded += movies.length;
 
             if (movies.length > 0) {
                 const container = document.getElementById(`${sectionName}-scroll`);
                 movies.forEach(movie => {
                     container.innerHTML += createHorizontalCard(movie);
                 });
-            } else if (rawCount > 0) {
-                // Page came back but every row was a duplicate: stream is exhausted.
-                document.getElementById(`${sectionName}-view-all`).classList.remove('hidden');
+            } else if (rawCount === 0) {
+                // wave5 fix (J1.9): empty page → the stream is exhausted for
+                // this section; stop the refetch loop.
+                section.exhausted = true;
             }
+            // (When rawCount > 0 but every row was filtered out, the offset has
+            // already advanced, so the NEXT scroll simply loads the next page.)
         } catch (error) {
             console.error(`Error loading more for ${sectionName}:`, error);
+        } finally {
+            // wave5 fix (J1.9): release the guard even on failure.
+            section.loading = false;
         }
     }
     

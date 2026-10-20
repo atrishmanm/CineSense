@@ -252,8 +252,37 @@ def train_model(model_type='hybrid', epochs=10, batch_size=1024, learning_rate=0
         logger.info(f"\n📂 Found checkpoint: {checkpoint_path}")
         logger.info("   Loading checkpoint to resume training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        sd = checkpoint.get("model_state_dict", checkpoint)
+        if model_type == 'hybrid' and any(
+            k.startswith(("user_embedding.", "fusion.")) for k in sd
+        ):
+            # Legacy pre-BatchNorm key convention (audit F1.1): remap through
+            # the compatibility loader, then load into *this* model object so
+            # the optimizer's parameter references stay valid.
+            from training.models import load_hybrid_checkpoint
+
+            remapped_model = load_hybrid_checkpoint(
+                checkpoint_path, map_location=device
+            )
+            model.load_state_dict(remapped_model.state_dict())
+            logger.info(
+                "Hybrid checkpoint uses legacy keys; remapped via "
+                "training.models.load_hybrid_checkpoint (BatchNorm running "
+                "stats left at defaults; optimizer state is fresh)."
+            )
+        else:
+            model.load_state_dict(sd)
+        try:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        except (ValueError, KeyError) as opt_err:
+            # A remapped legacy hybrid checkpoint carries an optimizer state
+            # for the pre-BatchNorm parameter set (different count); keep the
+            # fresh optimizer in that case rather than crashing resume.
+            logger.warning(
+                "Optimizer state incompatible with the loaded model "
+                "(%s); starting with a fresh Adam state.",
+                opt_err,
+            )
         start_epoch = checkpoint["epoch"] + 1
         best_rmse_from_checkpoint = checkpoint.get("best_rmse", float('inf'))
         logger.info(f"   ✓ Resumed from epoch {checkpoint['epoch']} (Best RMSE: {best_rmse_from_checkpoint:.4f})")

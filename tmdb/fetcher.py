@@ -11,7 +11,8 @@ import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-logging.basicConfig(level=logging.INFO)
+# wave5 fix (C3.68): module-level logging.basicConfig hijacked the root
+# logger on import; modules now only obtain their own namespaced logger.
 logger = logging.getLogger(__name__)
 
 
@@ -40,8 +41,10 @@ class TMDBFetcher:
     
     def _make_request(self, endpoint, params=None):
         """Make API request with error handling"""
-        if params is None:
-            params = {}
+        # wave5 fix (E1.4): copy the caller's params dict so the shared/
+        # default dict is never mutated (stale api_key/page keys leaking
+        # into subsequent calls via cache pollution).
+        params = dict(params) if params else {}
         params['api_key'] = self.api_key
         
         url = f"{self.base_url}/{endpoint}"
@@ -51,11 +54,23 @@ class TMDBFetcher:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.Timeout:
-            logger.warning(f"TMDB request timed out: endpoint={endpoint}")
+            # wave5 fix (E1.3): exception/URL text can carry the api_key —
+            # redact it from every log line.
+            logger.warning(f"TMDB request timed out: endpoint={self._redact(endpoint)}")
             return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"TMDB API request failed: {e}")
+            logger.error(f"TMDB API request failed: {self._redact(str(e))}")
             return None
+
+    def _redact(self, text):
+        """Mask the TMDB api_key in loggable text (wave5 fix E1.3).
+
+        requests' exception messages embed the full URL, which carries the
+        api_key query parameter; log it with the key value replaced.
+        """
+        if text and self.api_key:
+            return text.replace(self.api_key, '***REDACTED***')
+        return text
     
     def get_popular_movies(self, page=1):
         """Fetch popular movies"""
@@ -203,6 +218,9 @@ class TMDBFetcher:
             dict: Movie data one at a time
         """
         filters = filters or {}
+        # wave5 fix (E1.4): copy so the caller's filter dict is not mutated
+        # page-by-page across generator resumptions.
+        filters = dict(filters)
         
         for page in range(1, max_pages + 1):
             filters['page'] = page
@@ -220,15 +238,49 @@ class TMDBFetcher:
             
             time.sleep(0.25)  # Rate limiting
     
+    @staticmethod
+    def _parse_release_year(date_value):
+        """Shallow YYYY extraction from a TMDB release/air date.
+
+        wave5 fix (E1.2): malformed dates ("0000-01-01", empty strings,
+        partial values) previously raised ValueError inside the batch loop
+        and poisoned the whole streaming batch; bad/absent dates now yield
+        None instead.
+        """
+        if not date_value:
+            return None
+        try:
+            year = int(str(date_value)[:4])
+            # Reject 4-digit garbage like '0000'
+            return year if 1800 <= year <= 2200 else None
+        except (TypeError, ValueError):
+            return None
+
     def parse_movie_data(self, movie_json):
-        """Parse TMDB movie JSON into database format"""
+        """Parse TMDB movie JSON into database format.
+
+        wave5 fix (C3.15/E1.1): TV payloads carry ``name``/``first_air_date``
+        and no ``title``/``release_date``; without normalization they parsed
+        to title='' and release_year=NULL rows. TV-shaped payloads are mapped
+        to the movie keys before parsing, on a copied dict so the caller's
+        payload is never mutated.
+        """
+        movie_json = dict(movie_json)
+        if not movie_json.get('title'):
+            movie_json['title'] = movie_json.get('name', '')
+        if not movie_json.get('original_title'):
+            movie_json['original_title'] = movie_json.get('original_name', movie_json.get('name', ''))
+        if not movie_json.get('release_date'):
+            movie_json['release_date'] = movie_json.get('first_air_date', '')
         return {
             'movie_id': movie_json['id'],
             'tmdb_id': movie_json['id'],
             'title': movie_json.get('title', ''),
             'original_title': movie_json.get('original_title', ''),
             'overview': movie_json.get('overview', ''),
-            'release_year': int(movie_json.get('release_date', '0000')[:4]) if movie_json.get('release_date') else None,
+            # wave5 fix (E1.2): guarded year extraction (no bare int() on
+            # malformed dates).
+            'release_year': self._parse_release_year(movie_json.get('release_date')),
             'runtime': movie_json.get('runtime'),
             'poster_path': movie_json.get('poster_path'),
             'backdrop_path': movie_json.get('backdrop_path'),
@@ -246,7 +298,13 @@ class TMDBFetcher:
                 data = self._make_request(endpoint, {'language': 'en-US'}) or {}
                 for g in data.get('genres', []):
                     mapping[g['id']] = (g.get('name') or '').strip()
-            self._genre_map_cache = mapping
+            # wave5 fix (E1.4): a transient failure returning an empty map
+            # used to be cached for the process lifetime (every later
+            # genre_ids list silently resolved to []); keep the cache unset
+            # so the next call retries.
+            if mapping:
+                self._genre_map_cache = mapping
+            return mapping
         return self._genre_map_cache
 
     def parse_genres(self, movie_json):

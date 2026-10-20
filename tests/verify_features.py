@@ -4,6 +4,7 @@ Comprehensive check of all implemented features
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -11,11 +12,10 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# Ensure project root is on sys.path and cwd
-PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-os.chdir(PROJECT_ROOT)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# Path baked in (audit I1.6c): os.chdir used to run at import time, silently
+# moving the process CWD as a side effect of import. The chdir is moved into
+# main() below; PROJECT_ROOT is just a constant here.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Color codes for terminal output
 class Colors:
@@ -48,6 +48,11 @@ def check_feature(feature_name, file_path, class_name=None):
     return status, color
 
 def main():
+    # os.chdir + sys.path setup done here, inside main(), per audit I1.6c
+    # (importing this module must not mutate the process CWD).
+    os.chdir(PROJECT_ROOT)
+    sys.path.insert(0, str(PROJECT_ROOT))
+
     print(f"\n{Colors.BOLD}{'='*70}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.BLUE}🎬 CINESENSE - FEATURE VERIFICATION REPORT{Colors.ENDC}")
     print(f"{Colors.BOLD}{'='*70}{Colors.ENDC}\n")
@@ -135,7 +140,7 @@ def main():
     
     # API Endpoints
     print(f"\n{Colors.BOLD}API ENDPOINTS:{Colors.ENDC}\n")
-    
+
     endpoints = {
         "/api/chat": "Conversational AI chatbot",
         "/api/mood-recommendations": "Mood-based recommendations",
@@ -147,18 +152,60 @@ def main():
         "/api/social/watchparty/create": "Create watch party",
         "/api/social/lists/create": "Create movie list"
     }
-    
-    if os.path.exists("app_integrated.py"):
-        with open("app_integrated.py", 'r', encoding='utf-8') as f:
-            app_content = f.read()
-            
+
+    # Audit I1.6a: the previous check mangled the endpoint string before
+    # searching (`'/api/chat'.replace('/', '\\/')` -> `\/api\/chat`), which
+    # never occurs in source, so every endpoint printed ✗ forever. Route
+    # registration is a quoted literal (e.g. `@app.route('/api/chat', ...)`),
+    # so the honest check searches for the QUOTED path and accepts both quote
+    # styles. Blueprint modules (api/social_routes.py,
+    # url_prefix='/api/social') register only the SUFFIX, so url_prefix
+    # declarations are parsed and the endpoint's remainder is checked too.
+    # Also scans api/routes.py; verdicts are counted toward the exit code
+    # (audit I1.6b) instead of being printed-only.
+    endpoint_failures = 0
+    app_files = ["app_integrated.py", "api/routes.py", "api/social_routes.py"]
+    available_sources = [p for p in app_files if os.path.exists(p)]
+
+    prefix_re = re.compile(r"url_prefix\s*=\s*(['\"])([^'\"]*)\1")
+
+    if not available_sources:
+        print(f"{Colors.YELLOW}⚠{Colors.ENDC} No app source found "
+              f"({', '.join(app_files)}) -- endpoints unverifiable")
+        endpoint_failures += len(endpoints)
+    else:
+        sources: dict[str, tuple[str, str]] = {}
+        for p in available_sources:
+            with open(p, "r", encoding="utf-8") as f:
+                content = f.read()
+            m = prefix_re.search(content)
+            prefix = m.group(2).rstrip("/") if m else ""
+            sources[p] = (content, prefix)
+
         for endpoint, description in endpoints.items():
-            # Check if endpoint is registered
-            endpoint_base = endpoint.split('<')[0].replace('/', '\\/').replace('.', '\\.')
-            if endpoint_base in app_content:
+            path = endpoint.split('<')[0]
+            registered = False
+            for content, prefix in sources.values():
+                if prefix and path.startswith(prefix):
+                    # Blueprint route literal: '/friends/add', ...
+                    if (("'" + path[len(prefix):] + "'") in content
+                            or ('"' + path[len(prefix):] + '"') in content):
+                        registered = True
+                        break
+                # App-level route literal: '/api/chat', ...
+                if (("'" + path + "'") in content
+                        or ('"' + path + '"') in content):
+                    registered = True
+                    break
+            if registered:
                 print(f"{Colors.GREEN}✓{Colors.ENDC} {endpoint:<35} {description}")
             else:
+                endpoint_failures += 1
                 print(f"{Colors.RED}✗{Colors.ENDC} {endpoint:<35} {description}")
+
+        if endpoint_failures:
+            print(f"\n{Colors.RED}{endpoint_failures} endpoint(s) not found in "
+                  f"{', '.join(available_sources)}{Colors.ENDC}")
     
     # Database Tables
     print(f"\n{Colors.BOLD}DATABASE TABLES:{Colors.ENDC}\n")
@@ -221,11 +268,18 @@ def main():
     print("2. Test features: python tests/test_features.py")
     print("3. Train models: python scripts/train_model.py (if needed)")
     print("4. Access UI: http://localhost:5000/features")
-    print(f"\n{Colors.GREEN}✓ Verification complete!{Colors.ENDC}\n")
 
-    # Non-zero exit when any listed feature file is missing so callers/CI can
-    # detect regressions instead of always seeing success.
-    return 0 if implemented == total else 1
+    # Non-zero exit when ANY verification failed so callers/CI can detect
+    # regressions (audit I1.6b): previously the exit code counted only the
+    # feature-file checks, so "all 9 endpoint checks print ✗" still exited 0
+    # while claiming success.
+    failed_checks = (total - implemented) + endpoint_failures
+    if failed_checks == 0:
+        print(f"\n{Colors.GREEN}✓ Verification complete!{Colors.ENDC}\n")
+        return 0
+    print(f"\n{Colors.RED}✗ Verification FAILED: {failed_checks} check(s) did not pass "
+          f"({total - implemented} feature, {endpoint_failures} endpoint).{Colors.ENDC}\n")
+    return 1
 
 
 if __name__ == "__main__":

@@ -22,7 +22,6 @@ from ai.two_tower_ncf import TwoTowerNCF
 from ai.hybrid_model import create_hybrid_model, precompute_content_embeddings
 from ai.evaluation import RecommenderEvaluator
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

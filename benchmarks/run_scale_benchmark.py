@@ -164,7 +164,9 @@ def main():
     report["feature_store"] = {
         "user_has_dynamic_taste": u_feats["taste_vector"] is not None,
         "total_lifetime_interactions": u_feats["total_lifetime_interactions"],
-        "batch_mget_100_items_latency_ms": 0.08,
+        # Audit H1.9: reference target, not measured (previously emitted as a
+        # hardcoded "batch_mget_100_items_latency_ms": 0.08 "measurement").
+        "batch_mget_100_items_target_ms": 0.08,
     }
     print(f"  Real-time EMA taste vector generated: {u_feats['taste_vector'] is not None}")
 

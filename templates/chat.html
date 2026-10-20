@@ -151,7 +151,8 @@
                         : `<div class="w-9 flex-shrink-0 bg-gray-700 rounded" style="height:54px;"></div>`
                     }
                     <div class="flex-1 min-w-0">
-                        <p class="text-xs font-semibold text-gray-200 line-clamp-2 leading-tight group-hover:text-white">${badge}${m.title || 'Unknown'}</p>
+                        <!-- wave5 fix (J2.4): title is DB text — escape it. -->
+                        <p class="text-xs font-semibold text-gray-200 line-clamp-2 leading-tight group-hover:text-white">${badge}${esc(m.title || 'Unknown')}</p>
                         <p class="text-xs text-gray-500 mt-0.5">${year}${rating}</p>
                     </div>
                 </div>
@@ -181,10 +182,11 @@
             const resp = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                // wave5 fix (J1.17): the backend deliberately binds identity to
+                // the session and ignores `history`/`user_id` — stop shipping
+                // payloads it never reads. (Backend rework is out of scope.)
                 body: JSON.stringify({
-                    message: msg,
-                    history: chatHistory.slice(-10),
-                    user_id: {{ session.get('user_id') | tojson }}
+                    message: msg
                 })
             });
 

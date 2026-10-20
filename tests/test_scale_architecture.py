@@ -54,7 +54,11 @@ class TestVectorSearchAndANN:
 
     def test_product_quantizer(self):
         pq = ProductQuantizer(dim=4, num_subvectors=2, num_centroids=4)
-        training_vecs = np.random.randn(20, 4).astype(np.float32)
+        # Audit I1.4: seed the training vectors (local RNG; previously a bare
+        # unseeded global np.random.randn call made this test nondeterministic
+        # and could flake PQ code-assignment edge cases).
+        rng = np.random.RandomState(0)
+        training_vecs = rng.randn(20, 4).astype(np.float32)
         pq.fit(training_vecs)
         codes = pq.encode(101, training_vecs[0])
         assert len(codes) == 2

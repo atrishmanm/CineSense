@@ -45,6 +45,10 @@ class RedisCache:
             password: Redis password (if required)
             default_ttl: Default time-to-live in seconds (1 hour)
         """
+        # wave5 fix (C1.40): default_ttl is initialized BEFORE the try/except
+        # so failure-initialized instances (client=None) still expose the
+        # attribute instead of AttributeError-ing later.
+        self.default_ttl = default_ttl
         try:
             self.client = redis.Redis(
                 host=host,
@@ -59,7 +63,6 @@ class RedisCache:
             # Test connection
             self.client.ping()
             
-            self.default_ttl = default_ttl
             logger.info(f"✓ Redis connected: {host}:{port}")
         
         except redis.ConnectionError as e:
@@ -96,9 +99,16 @@ class RedisCache:
         
         try:
             self.client.ping()
+            # wave5 fix (C1.43): reset the once-per-process outage flag on
+            # recovery so a LATER outage is announced at warning level again
+            # (previously the first incident silenced all future ones), and
+            # log a single INFO line that the connection came back.
+            global _redis_outage_logged
+            if _redis_outage_logged:
+                logger.info("Redis connection restored")
+                _redis_outage_logged = False
             return True
         except (redis.RedisError, OSError) as e:
-            global _redis_outage_logged
             if not _redis_outage_logged:
                 logger.warning("Redis unavailable: %s (further outages logged at debug)", e)
                 _redis_outage_logged = True
@@ -314,7 +324,10 @@ class RedisCache:
             self.client.setex(
                 key,
                 ttl,
-                json.dumps(movie_data)
+                # wave5 fix (C1.42): DB movie dicts carry Decimal/datetime
+                # fields; default=str serializes them instead of json.dumps
+                # raising TypeError and silently dropping the whole entry.
+                json.dumps(movie_data, default=str)
             )
         except Exception as e:
             logger.error(f"Error caching movie: {e}")
@@ -379,18 +392,23 @@ class RedisCache:
         
         try:
             info = self.client.info()
-            
+            total_keys = self.client.dbsize()
+
             return {
                 'available': True,
                 'used_memory': info.get('used_memory_human', 'N/A'),
-                'total_keys': self.client.dbsize(),
+                'total_keys': total_keys,
                 'hits': info.get('keyspace_hits', 0),
                 'misses': info.get('keyspace_misses', 0),
                 'hit_rate': self._calculate_hit_rate(
                     info.get('keyspace_hits', 0),
                     info.get('keyspace_misses', 0)
                 ),
-                'connected_clients': info.get('connected_clients', 0)
+                'connected_clients': info.get('connected_clients', 0),
+                # wave5 fix (C1.31): flat size/evictions keys the cache-stats
+                # consumers enumerate (redis INFO carries evicted_keys).
+                'size': total_keys,
+                'evictions': info.get('evicted_keys', 0)
             }
         except Exception as e:
             logger.error(f"Error getting cache stats: {e}")
@@ -402,6 +420,15 @@ class RedisCache:
         if total == 0:
             return 0.0
         return (hits / total) * 100
+
+    def get_cache_stats(self) -> Dict:
+        """Alias for get_stats.
+
+        wave5 fix (A1.1 defense): /api/cache-stats (app_integrated.py)
+        calls get_cache_stats(); only this alias makes the name resolve.
+        Callers should prefer get_stats().
+        """
+        return self.get_stats()
     
     # ========================================================================
     # SESSION MANAGEMENT
@@ -422,7 +449,8 @@ class RedisCache:
             self.client.setex(
                 key,
                 ttl,
-                json.dumps(session_data)
+                # wave5 fix (C1.42): same Decimal/datetime tolerance as set_movie.
+                json.dumps(session_data, default=str)
             )
         except Exception as e:
             logger.error(f"Error setting session: {e}")
@@ -447,6 +475,9 @@ class RedisCache:
 
 # Singleton instance
 _redis_cache = None
+# wave5 fix (C1.41): memoized flag so the "singleton already exists, kwargs
+# ignored" warning fires ONCE per process instead of spamming every call.
+_redis_cache_kwargs_warned = False
 
 
 def get_redis_cache(**kwargs) -> RedisCache:
@@ -454,11 +485,30 @@ def get_redis_cache(**kwargs) -> RedisCache:
 
     Accepts optional RedisCache constructor kwargs so callers can configure
     host/port/db/password without directly instantiating the class.
+
+    wave5 fix (C1.41): when the singleton already exists and the caller
+    passes different kwargs, they are ignored -- now loudly, but only once.
     """
-    global _redis_cache
+    global _redis_cache, _redis_cache_kwargs_warned
     
     if _redis_cache is None:
         _redis_cache = RedisCache(**kwargs)
+    elif kwargs:
+        # wave5 fix (C1.41): surface silently-ignored configuration so a
+        # wrong host/db/password request does not vanish without a trace
+        # (logged at most once per process to avoid per-call warning spam).
+        if not _redis_cache_kwargs_warned:
+            logger.warning(
+                "get_redis_cache: singleton already initialized, ignoring kwargs %s "
+                "(further occurrences logged at debug)",
+                sorted(kwargs)
+            )
+            _redis_cache_kwargs_warned = True
+        else:
+            logger.debug(
+                "get_redis_cache: singleton already initialized, ignoring kwargs %s",
+                sorted(kwargs)
+            )
     
     return _redis_cache
 

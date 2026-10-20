@@ -116,6 +116,24 @@ class TestSplitsAndLeakage:
         assert len(train_pairs.intersection(test_pairs)) == 0
         assert len(val_pairs.intersection(test_pairs)) == 0
 
+        # Chronological-order check (audit I1.5): pair-disjointness alone
+        # passes even if create_splits shuffles the temporal order (a
+        # regression that leaked future interactions into train would still
+        # keep the splits disjoint). For every user, each split's timestamps
+        # must be strictly greater than the previous split's. The synthetic
+        # data gives every (user, item) a unique timestamp (1000 + item_id),
+        # so strict inequality is deterministic here.
+        ts_by_split: dict = {}
+        for split_name in ("train", "val", "test"):
+            by_user: dict = {}
+            for r in splits[split_name]:
+                by_user.setdefault(r.user_id, set()).add(r.timestamp)
+            ts_by_split[split_name] = by_user
+
+        for uid in range(1, 11):
+            assert max(ts_by_split["train"][uid]) < min(ts_by_split["val"][uid])
+            assert max(ts_by_split["val"][uid]) < min(ts_by_split["test"][uid])
+
 
 class TestRecommenders:
     def test_popularity_recommender(self):

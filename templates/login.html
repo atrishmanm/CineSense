@@ -61,9 +61,12 @@
             const data = await response.json();
             
             if (response.ok) {
-                // Only allow same-site relative redirects (open-redirect guard)
+                // wave5 fix (J3.1): reject ANY redirect that is not a plain
+                // same-site path starting with a single '/'. A leading '\'
+                // slipped past the old '//' check, but browsers normalize
+                // '\'→'/' so '\evil.com' navigated off-site.
                 const raw = new URLSearchParams(window.location.search).get('redirect') || '/';
-                const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
+                const redirect = /^\/(?!\/)/.test(raw) && !raw.includes('\\') ? raw : '/';
                 window.location.href = redirect;
             } else {
                 errorDiv.textContent = data.error;

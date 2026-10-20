@@ -293,7 +293,8 @@
                 <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
                     <div class="relative rounded-lg overflow-hidden aspect-[2/3] bg-gray-800 transform transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl group-hover:z-10">
                         ${mediaTypeBadge}
-                        <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(movie.title)}';" />
+                        <!-- wave5 fix (J2.4): title comes from TMDB/DB ingest — escape it. -->
+                        <img src="${posterUrl}" alt="${esc(movie.title)}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='https://via.placeholder.com/342x513/1a1a1a/666666?text=${encodeURIComponent(movie.title)}';" />
                         <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                             <div class="absolute bottom-0 left-0 right-0 p-3">
                                 <div class="flex items-center justify-between mb-1">
@@ -308,7 +309,8 @@
                             </div>
                         </div>
                     </div>
-                    <h3 class="mt-2 font-semibold text-sm line-clamp-2">${movie.title}</h3>
+                    <!-- wave5 fix (J2.4): escape the ingested title. -->
+                    <h3 class="mt-2 font-semibold text-sm line-clamp-2">${esc(movie.title)}</h3>
                     ${searchScore}
                 </div>
             `;

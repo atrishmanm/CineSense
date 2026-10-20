@@ -8,7 +8,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from config import Config
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Metadata normalization divisors/caps for the metadata feature block of the

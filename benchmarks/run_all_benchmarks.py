@@ -17,6 +17,16 @@ Outputs:
 - benchmarks/results/benchmark_report.md
 - benchmarks/results/benchmark_results.json
 - benchmarks/results/metrics.csv
+
+Split protocol (audit H1.4): per-user chronological 70/10/20 split of ALL of
+MovieLens-100K (`create_splits` defaults). NOT comparable with the other
+harnesses: `run_comprehensive_evaluation.py` (80/10/10) and
+`run_32m_benchmarks.py` (75/10/15 on a 500K ML-32M reservoir) use different
+splits, catalogs and popularity definitions, so identically-named metrics sit
+on different scales. Also NOT self-comparable across parts (audit H1.7): Part
+E's Stage-2 rerank uses a +/-10 rating tally "ELO" and a different
+normalization than Part A's hybrid -- Part E final_ndcg@10 must not be read as
+the same "hybrid" quantity as Part A's.
 """
 
 from __future__ import annotations
@@ -124,6 +134,13 @@ def run_part_a(
                          item_pop, item_feats, K, return_per_user=True)
         m["fit_time_s"] = round(fit_s, 3)
         m["rec_time_s"] = round(rec_s, 3)
+        # Audit H1.2: surface whether the strategy's per-user preference term
+        # actually differentiates candidates. Only hybrid strategies carry the
+        # flag (set in benchmarks/recommenders.py::HybridRecommender.fit);
+        # strategies without a preference component stay unflagged and show
+        # "n/a" in the report table.
+        if hasattr(rec, "preference_active"):
+            m["preference_active"] = bool(rec.preference_active)
         results[rec.name] = m
 
         print(f"    fit={fit_s:.2f}s  rec={rec_s:.2f}s  "
@@ -177,6 +194,10 @@ def run_part_b(
         )
         m = evaluate_all(recs, val_relevant, len(splits["catalog"]),
                          item_pop, item_feats, K)
+        # Audit H1.2: expose the constant-preference flag per ablation row so
+        # the report can annotate rows that differ only in w_preference (which
+        # are equivalent configurations under this protocol).
+        m["preference_active"] = bool(getattr(rec, "preference_active", False))
         val_res[label] = m
 
     ranked = sorted(val_res.items(), key=lambda x: x[1][f"ndcg@{K}"], reverse=True)
@@ -191,6 +212,7 @@ def run_part_b(
                 )
                 m = evaluate_all(recs, test_relevant, len(splits["catalog"]),
                                  item_pop, item_feats, K)
+                m["preference_active"] = bool(getattr(rec, "preference_active", False))
                 test_res[label] = m
                 break
 
@@ -414,11 +436,22 @@ def generate_report(
 
         # -- A --
         w(f"## A -- Recommendation Quality Across {len(quality)} Strategies\n\n")
-        w("| Strategy | " + " | ".join(mk) + " |\n")
-        w("|---|" + "|".join(["---"] * len(mk)) + "|\n")
+        # Audit H1.2: expose the constant-preference boolean so readers see
+        # that the hybrid rows' preference term does NOT differentiate
+        # candidates under this protocol.
+        w("| Strategy | " + " | ".join(mk) + " | preference_active |\n")
+        w("|---|" + "|".join(["---"] * len(mk)) + "---|\n")
         for name, m in quality.items():
-            w(f"| **{name}** | " + " | ".join(_f(m.get(c, 0)) for c in mk) + " |\n")
+            w(f"| **{name}** | " + " | ".join(_f(m.get(c, 0)) for c in mk)
+              + f" | {str(m.get('preference_active', 'n/a')).lower()} |\n")
         w("\n")
+        w("> **preference_active = false** means the user-preference component "
+          "is a constant term for that row (user_pref items are train-rated and "
+          "excluded from candidates, so its sigmoid always evaluates to 0.5 and "
+          "only shifts every candidate by a fixed offset). See audit H1.2 "
+          "disclosure in benchmarks/recommenders.py::HybridRecommender.fit -- "
+          "weights compared across rows with the same preference_active are "
+          "NOT ablation-comparable via w_preference.\n\n")
 
         # Bootstrap CIs table
         w("### Paired Bootstrap 95% Confidence Intervals (vs Popularity Baseline)\n\n")
@@ -437,18 +470,34 @@ def generate_report(
 
         # -- B --
         w("## B -- Hybrid Weight Ablation Study\n\n### Validation Set\n\n")
-        w(f"| Configuration | NDCG@{K} | Recall@{K} | Coverage |\n|---|---|---|---|\n")
+        # Audit H1.2: preference_active column -- False for every row means
+        # configurations differing only in w_preference are duplicates, not
+        # distinct ablations.
+        w(f"| Configuration | NDCG@{K} | Recall@{K} | Coverage | preference_active |\n|---|---|---|---|---|\n")
         for name, m in sorted(ablation_val.items(),
                                key=lambda x: x[1].get(f"ndcg@{K}", 0), reverse=True):
             w(f"| {name} | {_f(m.get(f'ndcg@{K}',0))} | "
-              f"{_f(m.get(f'recall@{K}',0))} | {_f(m.get('catalog_coverage',0))} |\n")
+              f"{_f(m.get(f'recall@{K}',0))} | {_f(m.get('catalog_coverage',0))} | "
+              f"{str(m.get('preference_active', 'n/a')).lower()} |\n")
+
+        w("\n> **Constant-preference disclosure (audit H1.2):** every row above "
+          "is expected to report `preference_active = false`: the hybrid "
+          "preference weight contributes a fixed w_preference * 0.5 offset to "
+          "each candidate (user_pref holds only train-rated items, which "
+          "recommend_all removes from the candidate set). Ablation rows that "
+          "differ ONLY in w_preference (e.g. \"Equal (33/34/33)\" vs "
+          "\"Pref-heavy (20/60/20)\") are therefore equivalent configurations; "
+          "their differences in this table are noise. A protocol change "
+          "(candidate scoring that keeps train items or applies user_pref "
+          "before exclusion) is required to make w_preference meaningful.\n\n")
 
         w("\n### Test Set (Top 3 from Validation)\n\n")
-        w(f"| Configuration | NDCG@{K} | Recall@{K} | Coverage |\n|---|---|---|---|\n")
+        w(f"| Configuration | NDCG@{K} | Recall@{K} | Coverage | preference_active |\n|---|---|---|---|---|\n")
         for name, m in sorted(ablation_test.items(),
                                key=lambda x: x[1].get(f"ndcg@{K}", 0), reverse=True):
             w(f"| {name} | {_f(m.get(f'ndcg@{K}',0))} | "
-              f"{_f(m.get(f'recall@{K}',0))} | {_f(m.get('catalog_coverage',0))} |\n")
+              f"{_f(m.get(f'recall@{K}',0))} | {_f(m.get('catalog_coverage',0))} | "
+              f"{str(m.get('preference_active', 'n/a')).lower()} |\n")
         w("\n")
 
         # -- C --
@@ -522,12 +571,14 @@ def generate_report(
 
         # -- G --
         w("## G -- Diversity-Aware Discovery & Explainability Trade-Off\n\n")
-        w("| MMR Lambda | NDCG@10 | Recall@10 | Intra-List Diversity | Novelty | Catalog Coverage | Explanation Coverage |\n")
-        w("|---|---|---|---|---|---|---|\n")
+        # Audit H1.9: dropped the "Explanation Coverage" column -- it was fed
+        # by a hardcoded (never-measured) 1.0 literal in diversity_benchmark.
+        w("| MMR Lambda | NDCG@10 | Recall@10 | Intra-List Diversity | Novelty | Catalog Coverage |\n")
+        w("|---|---|---|---|---|---|\n")
         for dlabel, dm in diversity.items():
             w(f"| **{dlabel}** | {dm[f'ndcg@{K}']:.4f} | {dm[f'recall@{K}']:.4f} | "
               f"{dm['intra_list_diversity']:.4f} | {dm['novelty']:.2f} | "
-              f"{dm['catalog_coverage']:.1%} | {dm['explanation_coverage']:.0%} |\n")
+              f"{dm['catalog_coverage']:.1%} |\n")
         w("\n")
 
         # -- Resume --
@@ -553,7 +604,7 @@ def generate_report(
         w("* Built and profiled a 2-stage retrieval pipeline: candidate recall reached\n")
         w(f"  {cand_recall_300:.1%} at 300 candidates; Stage-2 rerank p95 = {rerank_p95_300:.2f} ms.\n")
         w("* Implemented MMR diversity reranking and traceable score explanations,\n")
-        w(f"  achieving {diversity.get('lambda=0.0 (No Rerank)', {}).get('explanation_coverage', 1.0):.0%} explanation coverage while mapping the relevance-diversity trade-off curve.\n")
+        w("  mapping the relevance-diversity trade-off curve.\n")
         w("* Benchmarked 1,000 requests with sliding-window LRU caching: cold p95 up to\n")
         w(f"  {cold_p95_max:.2f} ms vs {cache_p95_min:.4f} ms for a cache hit (max {max_lookup_speedup:,.0f}x lookup speedup; cache hit is a dict lookup, not inference).\n")
         w("```\n\n")

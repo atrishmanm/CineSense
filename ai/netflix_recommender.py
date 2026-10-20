@@ -9,7 +9,6 @@ from pathlib import Path
 from ai.inference_pipeline import load_production_model
 from database.db_manager import db
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

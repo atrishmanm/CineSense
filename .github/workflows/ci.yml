@@ -1,0 +1,38 @@
+name: CI
+
+# Minimal lint + test gate (audit K1.8): nothing here prevents the
+# checkpoint-key-drift class (F1.1) or a route regression from re-merging.
+# The live-server endpoint tests self-skip without a running backend, so the
+# pytest step gives offline signal only (see tests/test_endpoints.py etc.).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Python 3.11 (pip cache enabled)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install pyflakes (dev-only lint, not in requirements.txt)
+        run: pip install pyflakes
+
+      - name: Lint (pyflakes)
+        run: python -m pyflakes ai/ api/ database/ tmdb/ training/ serving/ inference/
+
+      - name: Tests (live-server tests auto-skip without a backend)
+        run: python -m pytest tests -q

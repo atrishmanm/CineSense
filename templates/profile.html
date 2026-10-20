@@ -154,6 +154,17 @@
         try {
             // Fetch user profile
             const profileResponse = await fetch('/api/user/profile');
+            // wave5 fix (J1.14): check status before parsing so a 401 body is
+            // not rendered as profile data ("watchlist is empty" lies).
+            if (profileResponse.status === 401) {
+                document.getElementById('loading-state').innerHTML = `
+                    <div class="text-center">
+                        <p class="text-xl mb-4">Please log in to view your profile.</p>
+                        <a href="/login" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg">Go to Login</a>
+                    </div>
+                `;
+                return;
+            }
             const profile = await profileResponse.json();
 
             // Fetch user preferences analysis
@@ -245,7 +256,7 @@
                 our AI has identified your unique taste profile.
             </p>
             <p class="mb-4">
-                You gravitate towards <span class="font-bold text-blue-400">${topGenres}</span> films, 
+                You gravitate towards <span class="font-bold text-blue-400">${esc(topGenres)}</span> films,
                 with an average preference for movies rated <span class="font-bold text-yellow-400">${avgRating}/10</span>.
             </p>
             <p class="mb-4">
@@ -275,7 +286,8 @@
             return `
                 <div>
                     <div class="flex justify-between text-sm mb-1">
-                        <span class="font-semibold">${genre.genre}</span>
+                        <!-- wave5 fix (J2.x): genre names are DB text — escape. -->
+                        <span class="font-semibold">${esc(genre.genre)}</span>
                         <span class="text-gray-400">${genre.count} movies</span>
                     </div>
                     <div class="w-full bg-gray-800 rounded-full h-3 overflow-hidden">
@@ -366,14 +378,15 @@
             return `
                 <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
                     <div class="relative rounded-lg overflow-hidden aspect-[2/3] mb-2">
-                        <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover">
+                        <!-- wave5 fix (J2.x): titles are DB text — escape. -->
+                        <img src="${posterUrl}" alt="${esc(movie.title)}" class="w-full h-full object-cover">
                         <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all flex items-center justify-center">
                             <span class="text-yellow-400 font-bold opacity-0 group-hover:opacity-100">
                                 ★ ${movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A'}
                             </span>
                         </div>
                     </div>
-                    <p class="text-sm font-semibold truncate">${movie.title}</p>
+                    <p class="text-sm font-semibold truncate">${esc(movie.title)}</p>
                     <p class="text-xs text-gray-400">${movie.release_year || ''}</p>
                 </div>
             `;
@@ -383,6 +396,15 @@
     async function loadWatchlist() {
         try {
             const res = await fetch('/api/watchlist');
+            // wave5 fix (J1.14): a 401 used to render "Your watchlist is
+            // empty" — surface the auth state instead.
+            if (res.status === 401) {
+                container.innerHTML = '<p class="text-indigo-400 col-span-full text-center py-8">Log in to see your watchlist.</p>';
+                return;
+            }
+            if (!res.ok) {
+                throw new Error(`Watchlist request failed (HTTP ${res.status})`);
+            }
             const data = await res.json();
             const container = document.getElementById('watchlist-movies');
             
@@ -399,14 +421,15 @@
                 return `
                     <div class="group cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
                         <div class="relative rounded-lg overflow-hidden aspect-[2/3] mb-2">
-                            <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover">
+                            <!-- wave5 fix (J2.x): titles are DB text — escape. -->
+                            <img src="${posterUrl}" alt="${esc(movie.title)}" class="w-full h-full object-cover">
                             <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all flex items-center justify-center">
                                 <span class="text-indigo-400 font-bold opacity-0 group-hover:opacity-100">
                                     View Details
                                 </span>
                             </div>
                         </div>
-                        <p class="text-sm font-semibold truncate">${movie.title}</p>
+                        <p class="text-sm font-semibold truncate">${esc(movie.title)}</p>
                         <p class="text-xs text-gray-400">${movie.release_year || ''}</p>
                     </div>
                 `;
@@ -429,7 +452,8 @@
             <div class="flex items-center justify-between">
                 <div class="flex items-center">
                     <span class="text-2xl font-bold text-gray-700 mr-3">${index + 1}</span>
-                    <span class="font-semibold">${director.name}</span>
+                    <!-- wave5 fix (J2.x): names are DB text — escape. -->
+                    <span class="font-semibold">${esc(director.name)}</span>
                 </div>
                 <span class="text-gray-400 text-sm">${director.count} movies</span>
             </div>
@@ -448,7 +472,8 @@
             <div class="flex items-center justify-between">
                 <div class="flex items-center">
                     <span class="text-2xl font-bold text-gray-700 mr-3">${index + 1}</span>
-                    <span class="font-semibold">${actor.name}</span>
+                    <!-- wave5 fix (J2.x): names are DB text — escape. -->
+                    <span class="font-semibold">${esc(actor.name)}</span>
                 </div>
                 <span class="text-gray-400 text-sm">${actor.count} movies</span>
             </div>

@@ -53,17 +53,27 @@ const API = {
             const response = await fetch(`${this.baseUrl}${endpoint}`, {
                 ...options,
                 headers: {
-                    'Content-Type': 'application/json',
+                    // wave5 fix (J1.13): stop forcing Content-Type on GETs —
+                    // only set it when a body is actually sent.
+                    ...((options.body || options.method) ? { 'Content-Type': 'application/json' } : {}),
                     ...options.headers
                 }
             });
-            
-            const data = await response.json();
-            
+
+            // wave5 fix (J1.13): check response.ok BEFORE parsing so a
+            // 401/500 body is never handed back to callers as data (e.g.
+            // getCacheStats would cache an error-shaped stats object and
+            // render false "0/100 (0%)" numbers).
             if (!response.ok) {
-                throw new Error(data.error || 'API request failed');
+                let message = `API request failed (HTTP ${response.status})`;
+                try {
+                    const errBody = await response.json();
+                    if (errBody && errBody.error) message = errBody.error;
+                } catch (jsonErr) { /* non-JSON error body — keep generic message */ }
+                throw new Error(message);
             }
-            
+
+            const data = await response.json();
             return data;
         } catch (error) {
             console.error('API Error:', error);
@@ -152,19 +162,32 @@ const API = {
     }
 };
 
+// wave5 fix (J2.x): shared HTML escaper. main.js loads before base.html's
+// inline script, so define it here only if not already present (base defines
+// the same helper).
+window.esc = window.esc || function (s) {
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
 // Movie Card Component
 function createMovieCard(movie) {
     const posterUrl = Utils.getPosterUrl(movie.poster_path);
     const rating = movie.tmdb_rating ? movie.tmdb_rating.toFixed(1) : 'N/A';
-    
+
     return `
         <div class="movie-card cursor-pointer" onclick="window.location.href='/movie/${movie.movie_id}'">
             <div class="relative rounded-lg overflow-hidden aspect-[2/3] group">
-                <img src="${posterUrl}" alt="${movie.title}" class="w-full h-full object-cover">
-                
+                <!-- wave5 fix (J2.x): title comes from TMDB/DB ingest — escape it. -->
+                <img src="${posterUrl}" alt="${esc(movie.title)}" class="w-full h-full object-cover">
+
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                     <div class="absolute bottom-0 left-0 right-0 p-4">
-                        <h3 class="font-bold text-lg mb-2 line-clamp-2">${movie.title}</h3>
+                        <h3 class="font-bold text-lg mb-2 line-clamp-2">${esc(movie.title)}</h3>
                         <div class="flex items-center justify-between text-sm">
                             <span class="flex items-center">
                                 <svg class="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">

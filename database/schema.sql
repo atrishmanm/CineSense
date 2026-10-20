@@ -959,11 +959,14 @@ BEGIN
     DECLARE movie_cursor CURSOR FOR
         SELECT DISTINCT m.movie_id,
             (
+                -- wave5 fix (C2.31/D1.9): normalize comma+space separators
+                -- like the movie_details view uses, since FIND_IN_SET does
+                -- not trim tokens.
                 (CASE WHEN FIND_IN_SET(v_favorite_genre, 
-                    (SELECT GROUP_CONCAT(g.genre_name) 
+                    REPLACE((SELECT GROUP_CONCAT(g.genre_name) 
                      FROM movie_genres mg 
                      INNER JOIN genres g ON mg.genre_id = g.genre_id 
-                     WHERE mg.movie_id = m.movie_id)) > 0 
+                     WHERE mg.movie_id = m.movie_id), ', ', ',')) > 0 
                 THEN 50 ELSE 0 END) +
                 (m.popularity / 100) +
                 (m.tmdb_rating * 5) +
@@ -1181,7 +1184,7 @@ BEGIN
     ELSE
         (
             SELECT m.* FROM comprehensive_movie_view m
-            WHERE FIND_IN_SET(v_favorite_genre, m.genres) > 0
+            WHERE FIND_IN_SET(v_favorite_genre, REPLACE(m.genres, ', ', ',')) > 0
             AND m.movie_id NOT IN (
                 SELECT chosen_movie_id FROM user_interactions WHERE user_id = p_user_id
                 UNION
@@ -1193,7 +1196,7 @@ BEGIN
         UNION ALL
         (
             SELECT m.* FROM comprehensive_movie_view m
-            WHERE (v_favorite_genre IS NULL OR FIND_IN_SET(v_favorite_genre, m.genres) = 0)
+            WHERE (v_favorite_genre IS NULL OR FIND_IN_SET(v_favorite_genre, REPLACE(m.genres, ', ', ',')) = 0)
             AND m.movie_id NOT IN (
                 SELECT chosen_movie_id FROM user_interactions WHERE user_id = p_user_id
                 UNION
@@ -1657,7 +1660,9 @@ BEGIN
     FROM movies m
     INNER JOIN movie_genres mg ON m.movie_id = mg.movie_id
     INNER JOIN genres g ON mg.genre_id = g.genre_id
-    WHERE FIND_IN_SET(g.genre_name, genre_list) > 0
+    -- wave5 fix (C2.31/D1.9): REPLACE is a defensive no-op for these
+    -- literal comma lists; it future-proofs against ', ' gaps.
+    WHERE FIND_IN_SET(g.genre_name, REPLACE(genre_list, ', ', ',')) > 0
     GROUP BY m.movie_id
     ORDER BY genre_match_count DESC, m.tmdb_rating DESC
     LIMIT limit_param;

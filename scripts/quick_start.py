@@ -9,13 +9,14 @@ import os
 import logging
 from pathlib import Path
 
-# Ensure working directory is project root
+# Project root (audit K1.4: no os.chdir at import time — the working
+# directory switch happens inside main() so importing this module is
+# side-effect free).
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-os.chdir(PROJECT_ROOT)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-TRAIN_SCRIPT = os.path.join('scripts', 'train_model.py')
+TRAIN_SCRIPT = os.path.join(PROJECT_ROOT, 'scripts', 'train_model.py')  # absolute: cwd-independent
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -210,6 +211,10 @@ def check_status():
 
 def main():
     """Main function"""
+    # Relative paths below (data/, ai/cache, model/, config imports of .env)
+    # all assume the project root as CWD; switch here — never at import time.
+    os.chdir(PROJECT_ROOT)
+
     # Initial checks
     if not check_data():
         logger.error("\n⚠ Data files not found. Please add data to data/ folder.")

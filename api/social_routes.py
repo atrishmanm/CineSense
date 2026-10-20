@@ -6,6 +6,7 @@ Friend recommendations, watch parties, collaborative lists
 from flask import Blueprint, request, jsonify, session
 from database.db_manager import db
 from datetime import datetime
+import mysql.connector
 import logging
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,13 @@ def _list_access(list_id, user_id):
 
 
 def _can_edit_list(list_id, user_id):
-    """True when the user may add/remove items on the list (creator or member)."""
+    """True when the user may add items to the list (creator, or a member with
+    the 'owner'/'editor' role).
+
+    wave5 fix (B1.1): this used to return True for any member, including
+    'viewer' — a viewer could add items and, via ON DUPLICATE KEY UPDATE,
+    overwrite other members' entries.
+    """
     list_row = db.query(
         "SELECT * FROM collaborative_lists WHERE list_id = %s",
         (list_id,),
@@ -67,9 +74,11 @@ def _can_edit_list(list_id, user_id):
         return None  # unknown list
     if list_row.get('creator_id') == user_id:
         return True
-    member = db.query(
-        "SELECT 1 AS ok FROM collaborative_list_members WHERE list_id = %s AND user_id = %s",
-        (list_id, user_id),
+    member = db.query("""
+        SELECT 1 AS ok FROM collaborative_list_members
+        WHERE list_id = %s AND user_id = %s
+          AND role IN ('owner', 'editor')
+    """, (list_id, user_id),
         fetch_all=False
     )
     return bool(member)
@@ -146,7 +155,17 @@ def add_friend():
             if pending[0]['from_user_id'] == friend_id:
                 return jsonify({'error': 'This user already sent you a request. Check Requests tab.'}), 400
             return jsonify({'error': 'Friend request already sent'}), 400
-        
+
+        # wave5 fix (B3.7): a declined request must stay declined — do not
+        # resurrect it to 'pending' via the ODKU below.
+        declined = db.query("""
+            SELECT 1 AS ok FROM friend_requests
+            WHERE (from_user_id = %s AND to_user_id = %s AND status = 'rejected')
+               OR (from_user_id = %s AND to_user_id = %s AND status = 'rejected')
+        """, (user_id, friend_id, friend_id, user_id))
+        if declined:
+            return jsonify({'error': 'Your earlier request was declined'}), 409
+
         # Create friend request with duplicate key handling
         db.execute("""
             INSERT INTO friend_requests (from_user_id, to_user_id, status, created_at)
@@ -179,7 +198,6 @@ def get_friend_requests():
                 fr.request_id,
                 fr.from_user_id,
                 u.username,
-                u.email,
                 fr.created_at
             FROM friend_requests fr
             JOIN users u ON fr.from_user_id = u.user_id
@@ -217,10 +235,17 @@ def accept_friend_request():
         from_user_id = request_data[0]['from_user_id']
         
         # Create friendship
-        db.execute("""
-            INSERT INTO friendships (user_id_1, user_id_2, status, created_at)
-            VALUES (%s, %s, 'accepted', NOW())
-        """, (from_user_id, user_id))
+        # wave5 fix (B3.6): accepting an already-accepted request hit the
+        # unique_friendship constraint and 500'd; treat the duplicate as
+        # success and let the request-status update below run as before.
+        already_friends = False
+        try:
+            db.execute("""
+                INSERT INTO friendships (user_id_1, user_id_2, status, created_at)
+                VALUES (%s, %s, 'accepted', NOW())
+            """, (from_user_id, user_id))
+        except mysql.connector.errors.IntegrityError:
+            already_friends = True
         
         # Update request status
         db.execute("""
@@ -229,6 +254,8 @@ def accept_friend_request():
             WHERE request_id = %s
         """, (request_id,))
         
+        if already_friends:
+            return jsonify({'message': 'Already friends'}), 200
         return jsonify({'message': 'Friend request accepted'}), 200
     
     except Exception as e:
@@ -251,7 +278,9 @@ def remove_friend():
         
     try:
         # Remove from friendships
-        db.execute("""
+        # wave5 fix (B3.9): report 404 when no friendship row existed instead
+        # of returning success unconditionally.
+        removed = db.execute("""
             DELETE FROM friendships 
             WHERE (user_id_1 = %s AND user_id_2 = %s)
                OR (user_id_1 = %s AND user_id_2 = %s)
@@ -264,6 +293,8 @@ def remove_friend():
                OR (from_user_id = %s AND to_user_id = %s)
         """, (user_id, friend_id, friend_id, user_id))
         
+        if not removed:
+            return jsonify({'error': 'Friendship not found'}), 404
         return jsonify({'message': 'Friend removed successfully'}), 200
     except Exception as e:
         logger.error(f"Error removing friend: {e}")
@@ -284,7 +315,6 @@ def get_friends():
                 u.user_id as friend_id,
                 u.user_id as id,
                 u.username,
-                u.email,
                 MAX(f.created_at) as created_at
             FROM (
                 SELECT user_id_2 as friend_id, created_at FROM friendships WHERE user_id_1 = %s AND status = 'accepted'
@@ -292,7 +322,7 @@ def get_friends():
                 SELECT user_id_1 as friend_id, created_at FROM friendships WHERE user_id_2 = %s AND status = 'accepted'
             ) f
             JOIN users u ON f.friend_id = u.user_id
-            GROUP BY u.user_id, u.username, u.email
+            GROUP BY u.user_id, u.username
             ORDER BY created_at DESC
         """, (user_id, user_id))
         
@@ -574,10 +604,13 @@ def join_watch_party(party_id):
             return jsonify({'error': 'You are not invited to this watch party'}), 404
 
         # Update invitation status (rowcount tells us if anything actually changed)
+        # wave5 fix (B3.8): a declined invitation must stay declined — the old
+        # `status <> 'accepted'` filter flipped 'declined' rows to 'accepted'.
         rows = db.execute("""
             UPDATE watch_party_invites
             SET status = 'accepted'
-            WHERE party_id = %s AND user_id = %s AND status <> 'accepted'
+            WHERE party_id = %s AND user_id = %s
+              AND status <> 'accepted' AND status <> 'declined'
         """, (party_id, user_id))
         if not rows:
             current = db.query(
@@ -587,6 +620,8 @@ def join_watch_party(party_id):
             )
             if current and current.get('status') == 'accepted':
                 return jsonify({'message': 'Already a member of this watch party'}), 200
+            if current and current.get('status') == 'declined':
+                return jsonify({'error': 'You declined this invitation'}), 409
             return jsonify({'error': 'Watch party invitation not found'}), 404
 
         return jsonify({'message': 'Joined watch party!'}), 200
@@ -776,7 +811,6 @@ def add_movie_to_list(list_id):
             INSERT INTO collaborative_list_items (list_id, movie_id, added_by, notes, position, added_at)
             VALUES (%s, %s, %s, %s, %s, NOW())
             ON DUPLICATE KEY UPDATE
-                added_by = VALUES(added_by),
                 notes = VALUES(notes),
                 position = VALUES(position),
                 added_at = NOW()

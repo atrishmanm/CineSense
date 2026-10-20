@@ -3,7 +3,6 @@ Trending & Virality Detection
 Detects which movies are trending using velocity and acceleration metrics
 """
 
-import numpy as np
 from datetime import datetime, timedelta
 from typing import List, Dict
 import logging
@@ -67,28 +66,42 @@ class TrendingDetector:
                 interaction_counts.append(count[0]['count'] if count else 0)
             
             # Calculate velocity (change in interactions over time)
+            # wave5 fix (C2.39): the counts are CUMULATIVE windows ("seen in
+            # the last N hours"), so the old consecutive-bucket differences
+            # described stale 1h-6h-ago traffic and never touched the freshest
+            # 0-1h signal. Compute a per-window per-hour rate instead,
+            # ordered MOST-RECENT-FIRST: velocities[0] is now truthfully the
+            # interactions/hour of the last 1 hour.
             velocities = []
-            for i in range(len(interaction_counts) - 1):
-                # Interactions per hour
-                time_diff = self.time_windows[i+1] - self.time_windows[i]
-                count_diff = interaction_counts[i+1] - interaction_counts[i]
-                velocity = count_diff / time_diff if time_diff > 0 else 0
-                velocities.append(velocity)
-            
-            # Calculate acceleration (change in velocity)
-            accelerations = []
-            for i in range(len(velocities) - 1):
-                acceleration = velocities[i] - velocities[i+1]
-                accelerations.append(acceleration)
+            for i, window_hours in enumerate(self.time_windows):
+                # Interactions per hour within this window
+                # (guard only for a misconfigured 0-hour window entry)
+                if window_hours > 0:
+                    velocities.append(interaction_counts[i] / window_hours)
+                else:
+                    velocities.append(0.0)
             
             # Trending score formula
             # Weight recent activity more heavily
             if len(velocities) > 0:
-                recent_velocity = velocities[0]  # Most recent
-                avg_velocity = np.mean(velocities)
+                recent_velocity = velocities[0]  # Most recent (last 1h per-hour rate)
                 
-                # Recent acceleration
-                recent_acceleration = accelerations[0] if accelerations else 0
+                # Sustained activity: average per-hour rate across the whole
+                # weekly window (cumulative count / 168h).
+                avg_velocity = interaction_counts[-1] / self.time_windows[-1]
+                
+                # Recent acceleration: change in the per-hour rate between the
+                # newest window (last 1h) and the previous bucket
+                # (1h-6h band, i.e. counts[1]-counts[0] divided over its 5h span).
+                if len(velocities) > 1:
+                    prior_band_hours = self.time_windows[1] - self.time_windows[0]
+                    prior_rate = (
+                        (interaction_counts[1] - interaction_counts[0]) / prior_band_hours
+                        if prior_band_hours > 0 else 0.0
+                    )
+                    recent_acceleration = velocities[0] - prior_rate
+                else:
+                    recent_acceleration = 0.0
                 
                 # Combined score
                 # High positive acceleration = going viral

@@ -6,8 +6,10 @@ RESTful API endpoints for the CineSense application
 from flask import Blueprint, request, jsonify, session, current_app
 import csv
 import re
+import time
 import threading
 from pathlib import Path
+import mysql.connector
 from database.db_manager import db
 from config import Config
 from ai.recommender import recommender
@@ -26,6 +28,7 @@ TMDB_CSV_PATH = Path(__file__).resolve().parent.parent / 'data' / 'tmdb' / 'TMDB
 # ---- Input validation limits / whitelists ----------------------------------
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100                       # hard cap for client-supplied limit params
+MAX_OFFSET = 10000                    # wave5 fix (B2.2): cap for pagination offsets
 PROFILE_INTERACTION_LIMIT = 5000      # interactions scanned when building taste profile
 PREFERENCES_INTERACTION_LIMIT = 1000  # interactions scanned for preference analysis
 HISTORY_INTERACTION_LIMIT = 1000      # interactions scanned for the activity timeline
@@ -43,6 +46,14 @@ VALID_WATCHLIST_STATUSES = {'planned', 'watching', 'completed', 'dropped'}
 HELPFUL_VOTE_DEDUPE_MAX = 10000
 _helpful_votes_seen = set()
 _helpful_votes_lock = threading.Lock()
+
+# Anti-replay window for /api/feedback (audit B1.3): the same (user, pair)
+# submission within the window is rejected instead of double-applying the ELO
+# delta. In-memory and per-process only; a DB-backed dedupe is future work.
+FEEDBACK_REPLAY_WINDOW_SECONDS = 60
+FEEDBACK_DEDUPE_MAX_AGE_SECONDS = 300
+_recent_feedback = {}
+_recent_feedback_lock = threading.Lock()
 
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
@@ -67,7 +78,7 @@ def _parse_limit(value, default=DEFAULT_LIMIT, maximum=MAX_LIMIT):
 
 
 def _parse_offset(value, default=0):
-    """Coerce a client-supplied offset into >= 0. Raises ValueError on bad input."""
+    """Coerce a client-supplied offset into 0..MAX_OFFSET. Raises ValueError on bad input."""
     if value is None or value == '':
         return default
     try:
@@ -76,7 +87,23 @@ def _parse_offset(value, default=0):
         raise ValueError('offset must be an integer')
     if parsed < 0:
         raise ValueError('offset must be a non-negative integer')
-    return parsed
+    # wave5 fix (B2.2): cap the offset so ?offset=1000000 cannot trigger an
+    # unbounded recommendation fetch.
+    return min(parsed, MAX_OFFSET)
+
+
+def _parse_movie_id(value):
+    """Validate a client-supplied movie id.
+
+    Returns (parsed_int, error_message); error_message is None when valid.
+    wave5 fix (B2.3): non-integer ids used to fall through to SQL and 500.
+    """
+    if value is None or value == '':
+        return None, 'movie_id required'
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, 'movie_id must be an integer'
 
 
 def _is_valid_email(email):
@@ -218,7 +245,13 @@ def signup():
         password_hash = generate_password_hash(password)
 
         # Create user
-        user_id = db.create_user(username, email, password_hash)
+        # wave5 fix (B1.5): the duplicate pre-check above can race with a
+        # concurrent signup; rely on the UNIQUE constraint for the true answer
+        # instead of returning a 500.
+        try:
+            user_id = db.create_user(username, email, password_hash)
+        except mysql.connector.errors.IntegrityError:
+            return jsonify({'error': 'Username or email already exists'}), 409
 
         # Set session
         session['user_id'] = user_id
@@ -748,9 +781,54 @@ def submit_feedback():
         if chosen_id not in [movie1_id, movie2_id]:
             logger.error(f"Invalid chosen_id: {chosen_id} not in [{movie1_id}, {movie2_id}]")
             return jsonify({'error': 'Invalid chosen movie'}), 400
-        
-        # Record interaction using stored procedure (handles Elo automatically)
+
         session_id = session.get('session_id', str(user_id))
+
+        # wave5 fix (B1.3): reject an identical pair replayed within the window.
+        # The timestamp is recorded up-front so concurrent duplicates also lose
+        # the race; it is discarded again if the write below fails.
+        replay_key = (user_id, movie1_id, movie2_id)
+        now = time.time()
+        with _recent_feedback_lock:
+            seen_at = _recent_feedback.get(replay_key)
+            if seen_at is not None and now - seen_at < FEEDBACK_REPLAY_WINDOW_SECONDS:
+                return jsonify({'error': 'Already recorded'}), 409
+            # Cap dict growth: purge entries older than the max age on insert.
+            stale = [k for k, ts in _recent_feedback.items()
+                     if now - ts >= FEEDBACK_DEDUPE_MAX_AGE_SECONDS]
+            for stale_key in stale:
+                _recent_feedback.pop(stale_key, None)
+            _recent_feedback[replay_key] = now
+
+        # wave5 fix (C1.1): /api/feedback used to call db.record_interaction
+        # directly, so process_user_choice (bandit/embedding/preference
+        # updates) never ran for real feedback. Route the write through the AI
+        # layer, falling back to the direct DB write if it is unavailable.
+        # The rejected id is simply the other movie of the pair.
+        updated = False
+        if recommender is not None:
+            try:
+                # NOTE: process_user_choice itself records the interaction row
+                # via db.record_interaction internally, so a True result already
+                # persisted the choice.
+                updated = recommender.process_user_choice(
+                    user_id,
+                    chosen_id,
+                    movie2_id if chosen_id == movie1_id else movie1_id,
+                    session_id
+                )
+            except Exception as exc:
+                logger.warning(f"process_user_choice failed; falling back to direct DB write: {exc}")
+
+        if updated:
+            logger.info(f"Feedback recorded: user={user_id}, chosen={chosen_id}")
+            return jsonify({
+                'message': 'Feedback recorded successfully',
+                'learning': 'AI model updated based on your preference',
+                'success': True
+            }), 200
+
+        # Record interaction using stored procedure (handles Elo automatically)
         success = db.record_interaction(
             user_id=user_id,
             movie_1_id=movie1_id,
@@ -761,6 +839,8 @@ def submit_feedback():
         
         if not success:
             logger.error(f"Database operation failed for user {user_id}")
+            with _recent_feedback_lock:
+                _recent_feedback.pop(replay_key, None)
             return jsonify({'error': 'Failed to process feedback'}), 500
         
         logger.info(f"Feedback recorded: user={user_id}, chosen={chosen_id}")
@@ -775,7 +855,8 @@ def submit_feedback():
         logger.error(f"Feedback error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+        # wave5 fix (B3.3): do not leak internal exception text to clients.
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 # ============================================================================
@@ -943,9 +1024,14 @@ def add_to_watchlist():
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
     data = _json_body()
-    movie_id = data.get('movie_id')
-    if not movie_id:
+    raw_movie_id = data.get('movie_id')
+    # wave5 fix (B2.3): reject non-integer movie ids with 400 instead of letting
+    # them surface as a SQL error / 500.
+    movie_id, movie_id_error = _parse_movie_id(raw_movie_id)
+    if not raw_movie_id:
         return jsonify({'error': 'movie_id required'}), 400
+    if movie_id_error:
+        return jsonify({'error': movie_id_error}), 400
 
     status = data.get('status', 'planned')
     if status not in VALID_WATCHLIST_STATUSES:
@@ -1042,10 +1128,15 @@ def add_review():
     if not user_id:
         return jsonify({'error': 'Login required'}), 401
     data = _json_body()
-    movie_id = data.get('movie_id')
+    raw_movie_id = data.get('movie_id')
     rating = data.get('rating')
-    if not movie_id or rating is None:
+    # wave5 fix (B2.3): reject non-integer movie ids with 400 instead of letting
+    # them surface as a SQL error / 500.
+    movie_id, movie_id_error = _parse_movie_id(raw_movie_id)
+    if not raw_movie_id or rating is None:
         return jsonify({'error': 'movie_id and rating required'}), 400
+    if movie_id_error:
+        return jsonify({'error': movie_id_error}), 400
     try:
         rating = float(rating)
     except (TypeError, ValueError):
@@ -1053,7 +1144,19 @@ def add_review():
     if not 1 <= rating <= 10:
         return jsonify({'error': 'rating must be between 1 and 10'}), 400
     try:
+        # wave5 fix (B2.7): the upsert silently overwrites an existing review;
+        # probe first so an overwrite reports 'Review updated' (200) while a
+        # first submission reports 'Review added' (201). (MySQL ODKU rowcount
+        # 1=insert / 2=update would need a rowcount-returning db_manager
+        # method, which is owned elsewhere.)
+        existing_review = db.query(
+            "SELECT 1 AS ok FROM movie_reviews WHERE user_id = %s AND movie_id = %s",
+            (user_id, movie_id),
+            fetch_all=False
+        )
         db.add_review(user_id, movie_id, rating, data.get('review_text'), data.get('is_spoiler', False))
+        if existing_review:
+            return jsonify({'success': True, 'message': 'Review updated'}), 200
         return jsonify({'success': True, 'message': 'Review added'}), 201
     except Exception as e:
         logger.error(f"Review add error: {e}")
@@ -1070,8 +1173,10 @@ def vote_helpful(review_id):
     with _helpful_votes_lock:
         if vote_key in _helpful_votes_seen:
             return jsonify({'error': 'You already voted this review as helpful'}), 409
+        # wave5 fix (B1.4): do not wipe the dedupe set at the cap (that reopened
+        # every previously-recorded vote); reject new votes instead.
         if len(_helpful_votes_seen) >= HELPFUL_VOTE_DEDUPE_MAX:
-            _helpful_votes_seen.clear()
+            return jsonify({'error': 'Too many votes; limit reached'}), 429
         _helpful_votes_seen.add(vote_key)
 
     try:
@@ -1408,9 +1513,9 @@ def search_movies():
         logger.error(f"Search error: {e}")
         import traceback
         traceback.print_exc()
+        # wave5 fix (B3.3): do not leak internal exception text to clients.
         return jsonify({
             'error': 'Internal server error',
-            'details': str(e),
             'success': False
         }), 500
 
@@ -1514,9 +1619,9 @@ def get_cache_stats():
         logger.error(f"Cache stats error: {e}")
         import traceback
         traceback.print_exc()
+        # wave5 fix (B3.3): do not leak internal exception text to clients.
         return jsonify({
             'error': 'Internal server error',
-            'details': str(e),
             'success': False
         }), 500
 

@@ -47,6 +47,8 @@ class CircuitBreaker:
         self.success_count = 0
         self.last_failure_time: float = 0.0
         self._lock = threading.Lock()
+        # wave5 fix (C1.38): single-explorer gate for HALF_OPEN probes.
+        self._half_open_probe_in_flight = False
 
     def execute(self, fn: Callable[[], Any], fallback_fn: Optional[Callable[[], Any]] = None) -> Any:
         now = time.time()
@@ -56,10 +58,26 @@ class CircuitBreaker:
                     # Transition to HALF_OPEN for exploratory probe
                     self.state = CircuitState.HALF_OPEN
                     self.success_count = 0
+                    # wave5 fix (C1.38): start the consecutive-failure count
+                    # from zero at OPEN->HALF_OPEN so one probe failure alone
+                    # cannot instantly re-open the breaker.
+                    self.failure_count = 0
+                    self._half_open_probe_in_flight = True
                 else:
+                    # wave5 fix (C1.37): capture the fallback here but run it
+                    # OUTSIDE the lock (a slow fallback was stalling every
+                    # other breaker user).
                     if fallback_fn:
-                        return fallback_fn()
+                        return self._run_fallback(fallback_fn)
                     raise CircuitBreakerOpenException("Circuit breaker is OPEN -- operation blocked")
+            elif self.state == CircuitState.HALF_OPEN and self._half_open_probe_in_flight:
+                # wave5 fix (C1.38): only ONE probe may execute while
+                # HALF_OPEN; other calls are rejected (or fallback).
+                if fallback_fn:
+                    return self._run_fallback(fallback_fn)
+                raise CircuitBreakerOpenException(
+                    "Circuit breaker is HALF_OPEN -- exploratory probe already in flight"
+                )
 
         try:
             result = fn()
@@ -68,12 +86,20 @@ class CircuitBreaker:
         except Exception as e:
             self._on_failure()
             if fallback_fn:
-                return fallback_fn()
+                return self._run_fallback(fallback_fn)
             raise e
+
+    @staticmethod
+    def _run_fallback(fallback_fn: Callable[[], Any]) -> Any:
+        # wave5 fix (C1.37): executed outside the breaker lock by design.
+        return fallback_fn()
 
     def _on_success(self) -> None:
         with self._lock:
             if self.state == CircuitState.HALF_OPEN:
+                # wave5 fix (C1.38): the probe finished; clear the single-
+                # explorer gate whether or not the success threshold is met.
+                self._half_open_probe_in_flight = False
                 self.success_count += 1
                 if self.success_count >= self.half_open_success_threshold:
                     self.state = CircuitState.CLOSED
@@ -83,6 +109,9 @@ class CircuitBreaker:
 
     def _on_failure(self) -> None:
         with self._lock:
+            # wave5 fix (C1.38): clear the HALF_OPEN probe gate on any
+            # completed (failed) probe so the next calls can probe/fail-over.
+            self._half_open_probe_in_flight = False
             self.failure_count += 1
             self.last_failure_time = time.time()
             if self.failure_count >= self.failure_threshold:
@@ -147,6 +176,13 @@ class IdempotencyRegistry:
         Returns (was_cached, result).
         If already executed, returns (True, cached_result).
         Otherwise executes execution_fn and stores with TTL.
+
+        wave5 fix (C1.36): the membership check and the store now happen in a
+        SINGLE lock acquisition with execution_fn run inside the lock, so two
+        concurrent same-key requests cannot both execute (check-then-act race
+        that violated the at-most-once contract). NOTE: long executions
+        serialize on this lock -- that is the deliberate at-most-once
+        tradeoff; keep execution_fn lightweight.
         """
         now = time.time()
         with self._lock:
@@ -158,10 +194,8 @@ class IdempotencyRegistry:
             if idempotency_key in self._keys:
                 return True, self._keys[idempotency_key][1]
 
-        # Execute
-        result = execution_fn()
-
-        with self._lock:
+            # Execute inside the lock: at-most-once, first caller wins.
+            result = execution_fn()
             self._keys[idempotency_key] = (now + self.ttl_sec, result)
 
         return False, result

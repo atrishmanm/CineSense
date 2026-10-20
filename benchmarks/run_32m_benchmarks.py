@@ -5,13 +5,19 @@ CineSense MovieLens-32M Comprehensive Benchmark Suite
 
 Evaluates recommendation algorithms on real MovieLens-32M data:
 - Configurable evaluation-user count and candidate retrieval pool (see CLI/constants)
-- Bootstrap iterations for paired 95% confidence intervals
+- Paired per-user bootstrap 95% confidence intervals on NDCG@10 versus the
+  "Global Popularity/Mean" baseline (same protocol as run_all_benchmarks.py)
 - Complete regression metrics (normalized RMSE for comparability, raw RMSE as the
   meaningful scale, MAE, R^2)
 - Decision support / classification metrics (Acc, Prec, Rec, F1, ROC-AUC, PR-AUC, MCC)
 - Top-10 Ranking metrics (NDCG@10, Hit Rate@10, MAP@10, MRR@10)
 - Beyond-Accuracy & Distributional metrics (Catalog Coverage, Gini, Novelty, ILD)
 - Multi-Stage Production Architecture (HNSW + Platt Calibration + DPP Fast MAP)
+
+Split protocol (audit H1.4): per-user chronological 75/10/15 split
+(`create_splits(test_ratio=0.15, val_ratio=0.10)`) on a seeded 500K-rating
+reservoir sample of ML-32M. Do NOT compare these numbers against the other
+ML-100K harnesses, which use different split ratios and catalogs.
 
 NOTE: "Deep V3/V4" models in this file are local offline surrogates (MF+content
 fusions), not the Kaggle-trained torch checkpoints in models/. Their metrics are
@@ -43,6 +49,7 @@ from benchmarks.data_loader import (
     load_movielens_32m_movies,
     load_movielens_32m_ratings,
 )
+from benchmarks.metrics import paired_bootstrap_ci
 from benchmarks.comprehensive_metrics import (
     calculate_classification_metrics,
     calculate_regression_metrics,
@@ -508,6 +515,11 @@ def run_32m_benchmarks():
     # Target normalization in [0, 1] range: y_norm = (r - 0.5) / 4.5
     y_true_norm = np.clip((y_true_raw - 0.5) / 4.5, 0.0, 1.0)
 
+    # Per-user NDCG@10 lists per model, aligned on the same eval_user_subset
+    # iteration order (skip conditions are user-deterministic and identical
+    # across models), so index i corresponds to the same user in every list.
+    per_user_ndcg10: Dict[str, List[float]] = {}
+
     for model in models:
         print(f"\n>> Evaluating: {model.name}...")
         t_eval_start = time.perf_counter()
@@ -620,6 +632,8 @@ def run_32m_benchmarks():
         }
 
         results["models"][model.name] = model_results
+        # Register the aligned per-user list for the paired bootstrap below.
+        per_user_ndcg10[model.name] = ndcg10_list
 
         print(
             f"    Normalized RMSE:  {norm_rmse:.4f}  "
@@ -632,6 +646,27 @@ def run_32m_benchmarks():
         print(f"    Hit Rate@10:      {np.mean(hr10_list)*100:.2f}%")
         print(f"    Coverage@10:      {cov*100:.2f}%")
         print(f"    Throughput (QPS): {qps:.1f}")
+
+    # Paired per-user bootstrap 95% CIs for NDCG@10 vs the Global
+    # Popularity/Mean baseline (same protocol as run_all_benchmarks.py:
+    # resample users with replacement, take percentiles of the per-user
+    # metric diff).  Audit H1.1: this file previously *claimed* bootstrap
+    # CIs in its docstring/metadata without any bootstrap code; the
+    # implementation below makes the claim true.
+    _baseline = "Global Popularity/Mean"
+    if _baseline in per_user_ndcg10 and per_user_ndcg10[_baseline]:
+        for name, u_ndcg in per_user_ndcg10.items():
+            if name == _baseline or not u_ndcg:
+                continue
+            if len(u_ndcg) != len(per_user_ndcg10[_baseline]):
+                # Users must pair 1:1 across models; skip rather than lie.
+                print(f"  [WARN] bootstrap skipped for {name}: per-user lists length mismatch.")
+                continue
+            results["models"][name]["ndcg10_bootstrap_vs_popularity"] = {
+                "baseline": _baseline,
+                "n_boot": 500,
+                **paired_bootstrap_ci(u_ndcg, per_user_ndcg10[_baseline], n_boot=500),
+            }
 
     # Step 5: Save Results JSON & Generate Markdown Report
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

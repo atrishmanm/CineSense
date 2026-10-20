@@ -7,9 +7,16 @@ from mysql.connector import pooling, Error
 from contextlib import contextmanager
 from config import Config
 import logging
+import threading
 
-logging.basicConfig(level=logging.INFO)
+# wave5 fix (C3.68): module-level logging.basicConfig hijacked the root
+# logger on import; modules now only obtain their own namespaced logger.
 logger = logging.getLogger(__name__)
+
+# wave5 fix (D1.8): serializes the cursor execute/callproc monkey-patching
+# so two threads patching cursors concurrently cannot observe/double-apply
+# each other's partial patch state.
+_cursor_patch_lock = threading.Lock()
 
 
 class DatabaseManager:
@@ -51,8 +58,18 @@ class DatabaseManager:
                 connection.rollback()
             raise
         finally:
-            if connection and connection.is_connected():
-                connection.close()
+            # wave5 fix (D2.1): close() MUST run unconditionally. With
+            # mysql-connector-python 8.2.0, PooledMySQLConnection.close() is
+            # what returns the slot to the pool — gating it on
+            # is_connected() (dead socket path) leaked the pool slot
+            # permanently, exhausting the pool after one MySQL blip.
+            if connection:
+                try:
+                    connection.close()
+                except Error as close_err:
+                    # A close failure here cannot unwedge the socket, but it
+                    # must not mask the exception that triggered `finally`.
+                    logger.warning(f"Error returning pooled connection: {close_err}")
     
     @contextmanager
     def get_cursor(self, dictionary=True, buffered=True, commit=True):
@@ -70,9 +87,21 @@ class DatabaseManager:
             # post-yield commit decision can tell reads from writes without
             # changing any call site.
             executed = None
+            patch_applied = False
             try:
+                # wave5 fix (D1.8): the patch sequence is atomic --
+                # the whole patch runs under _cursor_patch_lock, and a partial
+                # failure undoes the execute patch (previously a callproc
+                # patch failure left the wrapper installed with executed=None,
+                # so the first query below raised AttributeError on None.append).
+                #
+                # wave5 fix (D2.5): executemany is tracked alongside
+                # execute/callproc -- it writes but was invisible to the
+                # commit heuristic, so executemany writes were silently
+                # uncommitted.
                 original_execute = cursor.execute
                 original_callproc = cursor.callproc
+                original_executemany = cursor.executemany
 
                 def _tracked_execute(*args, **kwargs):
                     if args or kwargs:
@@ -83,9 +112,28 @@ class DatabaseManager:
                     executed.append("CALL " + str(args[0] if args else "?"))
                     return original_callproc(*args, **kwargs)
 
-                cursor.execute = _tracked_execute
-                cursor.callproc = _tracked_callproc
-                executed = []
+                def _tracked_executemany(*args, **kwargs):
+                    executed.append(
+                        "EXECUTEMANY " + (str(args[0]) if args else "<kwargs>")
+                    )
+                    return original_executemany(*args, **kwargs)
+
+                with _cursor_patch_lock:
+                    try:
+                        cursor.execute = _tracked_execute
+                        cursor.callproc = _tracked_callproc
+                        cursor.executemany = _tracked_executemany
+                        patch_applied = True
+                    except (AttributeError, TypeError):
+                        # Undo the partial patch so the fallback state below is
+                        # always consistent (no orphaned execute wrapper).
+                        try:
+                            cursor.execute = original_execute
+                        except (AttributeError, TypeError):
+                            pass
+                        patch_applied = False
+                if patch_applied:
+                    executed = []
             except (AttributeError, TypeError):
                 # Cursor implementation disallows patching (C extension):
                 # fall back to the legacy always-commit behavior.
@@ -320,7 +368,11 @@ class DatabaseManager:
         params = []
 
         if genre_name and genre_name != 'all':
-            conditions.append("FIND_IN_SET(%s, genres) > 0")
+            # wave5 fix (C2.31/D1.9): the movie_details view aggregates genres
+            # with SEPARATOR ', ' (comma+space), but FIND_IN_SET does not trim
+            # tokens -- only the alphabetically-first genre ever matched.
+            # Normalize the set so ', ' and ',' variants both work.
+            conditions.append("FIND_IN_SET(%s, REPLACE(genres, ', ', ',')) > 0")
             params.append(genre_name)
 
         if media_type == 'movie':
@@ -392,7 +444,7 @@ class DatabaseManager:
         """Get movies by genre"""
         query = """
             SELECT md.* FROM movie_details md
-            WHERE FIND_IN_SET(%s, md.genres) > 0
+            WHERE FIND_IN_SET(%s, REPLACE(md.genres, ', ', ',')) > 0
             ORDER BY md.tmdb_rating DESC
             LIMIT %s
         """
@@ -753,9 +805,19 @@ class DatabaseManager:
             return cursor.fetchall()
     
     def update_watchlist_status(self, user_id, movie_id, status, rating=None):
-        """Update watchlist entry status"""
+        """Update watchlist entry status.
+
+        wave5 fix (B2.6): PUT /api/watchlist/<id> validates ``rating`` (0-10)
+        but only the 'completed' branch persisted it -- ratings supplied for
+        'watching'/'planned' were silently dropped. user_rating is now written
+        for any status when provided.
+        """
         if status == 'completed':
             query = "UPDATE watchlist SET status = %s, user_rating = %s, watched_at = CURRENT_TIMESTAMP WHERE user_id = %s AND movie_id = %s"
+            params = (status, rating, user_id, movie_id)
+        elif rating is not None:
+            # wave5 fix (B2.6): same persistence for non-completed statuses.
+            query = "UPDATE watchlist SET status = %s, user_rating = %s WHERE user_id = %s AND movie_id = %s"
             params = (status, rating, user_id, movie_id)
         else:
             query = "UPDATE watchlist SET status = %s WHERE user_id = %s AND movie_id = %s"
@@ -924,6 +986,21 @@ class DatabaseManager:
         self._reject_multi_statement(sql, allow_multi)
         with self.get_cursor() as cursor:
             cursor.execute(sql, params or ())
+            if return_lastrowid:
+                return cursor.lastrowid
+            return cursor.rowcount
+
+    def execute_many(self, sql, seq_of_params, return_lastrowid=False):
+        """Execute an INSERT/UPDATE/DELETE against a sequence of parameter rows.
+
+        wave5 fix (D2.5): executemany writes were invisible to get_cursor's
+        commit heuristic (only execute/callproc were tracked). This wrapper
+        calls cursor.executemany (which get_cursor now tracks) and returns
+        cursor.rowcount -- the number of rows actually affected by the
+        whole batch -- instead of an unrelated lastrowid.
+        """
+        with self.get_cursor() as cursor:
+            cursor.executemany(sql, seq_of_params)
             if return_lastrowid:
                 return cursor.lastrowid
             return cursor.rowcount

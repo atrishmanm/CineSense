@@ -58,11 +58,14 @@ class CineSenseRecommenderHandler(BaseHandler):
         
         # Get model properties
         properties = context.system_properties
-        self.device = torch.device(
-            "cuda:" + str(properties.get("gpu_id")) 
-            if torch.cuda.is_available() 
-            else "cpu"
-        )
+        # gpu_id may be absent/unset ("None") even when CUDA is visible, and
+        # torch.device("cuda:None") raises ValueError; fall back to CPU
+        # (mirrors serving/model_handler.py) (audit F1.3).
+        gpu_id = properties.get("gpu_id")
+        if torch.cuda.is_available() and gpu_id not in (None, -1):
+            self.device = torch.device(f"cuda:{int(gpu_id)}")
+        else:
+            self.device = torch.device("cpu")
         
         # Load model architecture
         model_dir = properties.get("model_dir")
@@ -77,7 +80,51 @@ class CineSenseRecommenderHandler(BaseHandler):
                 "torch-model-archiver."
             )
         try:
-            self.model = torch.load(model_path, map_location=self.device)
+            payload = torch.load(model_path, map_location="cpu", weights_only=False)
+            if isinstance(payload, torch.nn.Module):
+                # Legacy contract: a full pickled nn.Module.
+                self.model = payload
+                logger.warning(
+                    "%s contains a full pickled nn.Module; this contract is "
+                    "deprecated — save state dicts (checkpoint dicts) instead.",
+                    model_path,
+                )
+            elif isinstance(payload, dict):
+                state = payload.get("model_state_dict", payload)
+                if any(k.startswith(("user_emb.", "user_embedding.", "fusion.")) for k in state):
+                    # HybridRecommender family: reuse the compatibility loader
+                    # from training.models so both the current naming
+                    # (user_emb.* / fc.*) and the legacy pre-BatchNorm naming
+                    # (user_embedding.* / movie_embedding.* / fusion.*) load
+                    # (audit F1.2). BatchNorm running stats are absent from
+                    # legacy files and kept at init (eval-mode BN ≈ identity
+                    # + eps); strict=False there is intentional.
+                    try:
+                        from training.models import load_hybrid_checkpoint
+                    except ImportError as imp_err:
+                        raise RuntimeError(
+                            f"{model_path} is a HybridRecommender state dict; "
+                            "loading it requires training.models "
+                            "(training/) to be importable."
+                        ) from imp_err
+                    self.model = load_hybrid_checkpoint(
+                        model_path, map_location="cpu"
+                    )
+                    # load_hybrid_checkpoint validates the remap and logs
+                    # defaulted BatchNorm params itself (audit F1.1).
+                else:
+                    raise RuntimeError(
+                        f"Unsupported state-dict keys in {model_path}: "
+                        f"{sorted(state)[:5]}... The handler only supports the "
+                        "HybridRecommender family (user_emb.* / fc.* or legacy "
+                        "user_embedding.* / fusion.*)."
+                    )
+            else:
+                raise TypeError(
+                    f"Unsupported checkpoint payload in {model_path}: "
+                    f"{type(payload)!r}. Expected a state dict or checkpoint dict."
+                )
+            self.model = self.model.to(self.device)
             self.model.eval()
             logger.info(f"✓ Model loaded from {model_path}")
         except Exception as e:
@@ -206,7 +253,12 @@ class CineSenseRecommenderHandler(BaseHandler):
     def postprocess(self, inference_output: torch.Tensor) -> List[Dict]:
         """
         Postprocess model outputs into response format
-        
+
+        Note on rating scale (audit F1.4): this handler clips predictions to
+        the 0.5-5.0 MovieLens-100K star scale, matching training/recommend.py.
+        The live app's TMDB-derived rating surfaces use 0-10 — would silently
+        blend if ever wired through `DL_SCORE_WEIGHT`; keep the scales apart.
+
         Args:
             inference_output: Raw model predictions
             
@@ -349,10 +401,14 @@ def export_model_for_torchserve(
 
     print(f"✓ Model exported to {output_dir}")
     print("\nTo create TorchServe model archive:")
+    # --model-file is required: without it the packaged MAR lacks the module
+    # class definition (the handler alone is not the model's arch) and
+    # initialization fails (audit F1.4; mirrors serving/model_handler.py).
     print("""
     torch-model-archiver \\
         --model-name cinesense_recommender \\
         --version 1.0 \\
+        --model-file training/models.py \\
         --serialized-file torchserve_models/model.pth \\
         --handler inference/torchserve_handler.py \\
         --export-path model_store/

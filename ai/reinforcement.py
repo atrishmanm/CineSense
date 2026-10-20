@@ -7,7 +7,6 @@ import numpy as np
 from config import Config
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

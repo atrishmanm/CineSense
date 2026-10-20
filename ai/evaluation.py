@@ -8,7 +8,6 @@ import numpy as np
 from sklearn.metrics import mean_squared_error
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

@@ -12,7 +12,6 @@ from config import Config
 import logging
 from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # NLG presentation thresholds (audit A130-A133): they tune explanation
